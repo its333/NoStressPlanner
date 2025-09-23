@@ -3,6 +3,8 @@
 import NextAuth, { type Session } from 'next-auth';
 import Discord from 'next-auth/providers/discord';
 
+import { debugLog } from './debug';
+
 const nextAuth = NextAuth({
   // Remove PrismaAdapter for JWT strategy - they are incompatible
   secret: process.env.NEXTAUTH_SECRET,
@@ -56,7 +58,7 @@ const nextAuth = NextAuth({
       return `${baseUrl}/`;
     },
     async jwt({ token, user, account }) {
-      console.log('🔍 JWT Callback:', {
+      debugLog('Auth: JWT callback', {
         hasToken: !!token,
         hasUser: !!user,
         userId: user?.id,
@@ -66,7 +68,7 @@ const nextAuth = NextAuth({
 
       // Initial sign in
       if (account && user) {
-        console.log('🔍 JWT Initial Sign In:', {
+        debugLog('Auth: JWT initial sign in', {
           userId: user.id,
           userName: user.name,
           provider: account.provider,
@@ -85,7 +87,7 @@ const nextAuth = NextAuth({
       return token;
     },
     async session({ session, token }) {
-      console.log('🔍 Session Callback:', {
+      debugLog('Auth: session callback', {
         hasSession: !!session,
         hasToken: !!token,
         userId: token?.id,
@@ -103,13 +105,13 @@ const nextAuth = NextAuth({
             discordId: token.discordId as string,
             emailVerified: token.emailVerified as Date,
           };
-          console.log('🔍 Session Created:', {
+          debugLog('Auth: session created', {
             userId: session.user.id,
             name: session.user.name,
             sessionKeys: Object.keys(session),
           });
         } else {
-          console.log('🔍 Session Callback: No token provided');
+          debugLog('Auth: session callback without token');
         }
         return session;
       } catch (error) {
@@ -118,7 +120,7 @@ const nextAuth = NextAuth({
       }
     },
     async signIn({ user, account }) {
-      console.log('🔍 SignIn Callback:', {
+      debugLog('Auth: sign-in callback', {
         userId: user.id,
         userName: user.name,
         provider: account?.provider,
@@ -128,7 +130,7 @@ const nextAuth = NextAuth({
   },
   events: {
     async signIn({ user, account, isNewUser }) {
-      console.log('🔍 SignIn Event:', {
+      debugLog('Auth: sign-in event', {
         userId: user.id,
         userName: user.name,
         provider: account?.provider,
@@ -136,7 +138,7 @@ const nextAuth = NextAuth({
       });
     },
     async session({ session, token }) {
-      console.log('🔍 Session Event:', {
+      debugLog('Auth: session event', {
         hasSession: !!session,
         hasToken: !!token,
         userId: session?.user?.id,

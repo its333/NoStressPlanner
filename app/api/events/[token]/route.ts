@@ -31,13 +31,11 @@ export const GET = monitorApiRoute(
       // INTELLIGENT CACHING: Use session-specific cache keys to prevent contamination
       // while still benefiting from caching for performance
 
-      // Get session info first for cache key generation
-      const sessionInfo = await sessionManager.getSessionInfo(req);
-
-      // Get event first to get the event ID for session key retrieval
-      const eventData = await getEventDataUltraOptimized(token);
-      const event = eventData;
-
+      // Fetch session information and event data concurrently
+      const [sessionInfo, event] = await Promise.all([
+        sessionManager.getSessionInfo(req),
+        getEventDataUltraOptimized(token),
+      ]);
       if (!event) {
         return NextResponse.json({ error: 'Event not found' }, { status: 404 });
       }
@@ -60,12 +58,20 @@ export const GET = monitorApiRoute(
         }
       }
 
-      // Event already fetched above for session key retrieval
-
       const now = new Date();
 
       // Data already fetched by optimized query - no additional DB calls needed!
       const attendeeSessions = event.attendeeSessions || [];
+      
+      const attendeeSessionByNameId = new Map<
+        string,
+        (typeof attendeeSessions)[number]
+      >();
+      attendeeSessions.forEach((session: any) => {
+        if (session?.attendeeName?.id) {
+          attendeeSessionByNameId.set(session.attendeeName.id, session);
+        }
+      });
       const votes = event.votes || [];
       const blocks = event.blocks || [];
 
@@ -111,28 +117,34 @@ export const GET = monitorApiRoute(
         event.phase = updated.phase;
       }
 
-      // Session info already retrieved above for cache key generation
+      // Resolve the viewer session from the already-fetched attendee sessions
+      const sessionFromKey = currentSessionKey
+        ? attendeeSessions.find(
+            (session: any) => session.sessionKey === currentSessionKey
+          )
+        : null;
+      const sessionFromUser =
+        !sessionFromKey && sessionInfo.userId
+          ? attendeeSessions.find(
+              (session: any) => session.userId === sessionInfo.userId
+            )
+          : null;
 
-      // Use the same session detection method as the vote API for consistency
-      let you = await getCurrentAttendeeSession(
-        event.id,
-        sessionInfo.userId || undefined,
-        currentSessionKey || undefined
-      );
+      let you = (sessionFromKey || sessionFromUser) ?? null;
 
-      // If no session found but we have a session key, wait a bit and try again
-      // This handles the case where a vote was just submitted and the session is being created
-      if (!you && currentSessionKey) {
-        debugLog('Event API: attendee session not found, retrying', {
-          eventId: event.id,
-          sessionKeyPreview: `${currentSessionKey.substring(0, 20)}...`,
-        });
-        await new Promise(resolve => setTimeout(resolve, 100));
+      if (!you && (currentSessionKey || sessionInfo.userId)) {
         you = await getCurrentAttendeeSession(
           event.id,
           sessionInfo.userId || undefined,
           currentSessionKey || undefined
         );
+      }
+
+      if (you) {
+        attendeeSessionByNameId.set(you.attendeeName.id, you);
+        if (!attendeeSessions.find((session: any) => session.id === you?.id)) {
+          attendeeSessions.push(you as any);
+        }
       }
 
       debugLog('Event API: session detection summary', {
@@ -145,6 +157,13 @@ export const GET = monitorApiRoute(
             : null,
           fallbackUsed: sessionInfo.fallbackUsed,
         },
+        detectionMethod: sessionFromKey
+          ? 'sessionKey'
+          : sessionFromUser
+            ? 'userId'
+            : you
+              ? 'fallback'
+              : 'none',
         you: you
           ? {
               id: you.id,
@@ -241,9 +260,7 @@ export const GET = monitorApiRoute(
         const attendeeName = event.attendeeNames.find(
           (name: any) => name.id === attendeeNameId
         );
-        const session = attendeeSessions.find(
-          (s: any) => s.attendeeName?.id === attendeeNameId && s.isActive
-        );
+        const session = attendeeSessionByNameId.get(attendeeNameId as string);
 
         return {
           id: attendeeNameId,
@@ -256,9 +273,9 @@ export const GET = monitorApiRoute(
 
       // Get name availability (based on active sessions)
       const nameAvailability = (event.attendeeNames || []).map((name: any) => {
-        const activeSession = (attendeeSessions || []).find(
-          (session: any) => session.attendeeName?.id === name.id
-        );
+        const activeSession = attendeeSessionByNameId.get(name.id);
+        const sessionUserId = activeSession?.userId || undefined;
+        const viewerUserId = sessionInfo.userId || you?.user?.id;
         return {
           id: name.id,
           label: name.label,
@@ -268,7 +285,7 @@ export const GET = monitorApiRoute(
               ? 'claimed'
               : 'taken'
             : null,
-          claimedByLoggedUser: !!activeSession?.userId,
+          claimedByLoggedUser: !!viewerUserId && sessionUserId === viewerUserId,
         };
       });
 

@@ -5,9 +5,9 @@ export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 
 import {
-  getCurrentAttendeeSession,
   createAttendeeSession,
   generateSessionKey,
+  getCurrentAttendeeSession,
 } from '@/lib/attendees';
 import { auth } from '@/lib/auth';
 import { invalidateEventOperationCache } from '@/lib/cache-invalidation';
@@ -18,6 +18,72 @@ import { rateLimiters } from '@/lib/rate-limiter';
 import { emit } from '@/lib/realtime';
 import { sessionManager } from '@/lib/session-manager';
 import { joinEventSchema } from '@/lib/validators';
+import type { AttendeeNameStatus, JoinSuccessResponse } from '@/types/api';
+
+type ActiveSession = {
+  id: string;
+  attendeeNameId: string;
+  userId: string | null;
+  sessionKey: string;
+  displayName: string;
+  timeZone: string;
+  anonymousBlocks: boolean;
+  hasSavedAvailability: boolean;
+  attendeeName: {
+    id: string;
+    label: string;
+    slug: string;
+  };
+};
+
+function normalizeSession(session: any): ActiveSession {
+  return {
+    id: session.id,
+    attendeeNameId: session.attendeeNameId,
+    userId: session.userId ?? null,
+    sessionKey: session.sessionKey,
+    displayName: session.displayName,
+    timeZone: session.timeZone,
+    anonymousBlocks: session.anonymousBlocks ?? true,
+    hasSavedAvailability: session.hasSavedAvailability ?? false,
+    attendeeName: {
+      id: session.attendeeName.id,
+      label: session.attendeeName.label,
+      slug: session.attendeeName.slug,
+    },
+  };
+}
+
+function buildAttendeeNameStatuses(
+  attendeeNames: Array<{ id: string; label: string; slug: string }>,
+  sessions: ActiveSession[],
+  viewerUserId?: string | null
+): AttendeeNameStatus[] {
+  const byNameId = new Map(
+    sessions.map(session => [session.attendeeNameId, session])
+  );
+
+  return attendeeNames.map(name => {
+    const session = byNameId.get(name.id);
+    const takenBy = session ? (session.userId ? 'claimed' : 'taken') : null;
+
+    return {
+      id: name.id,
+      label: name.label,
+      slug: name.slug,
+      takenBy,
+      claimedByLoggedUser: !!viewerUserId && session?.userId === viewerUserId,
+    };
+  });
+}
+
+function createSuccessResponse(payload: JoinSuccessResponse) {
+  const response = NextResponse.json(payload);
+  response.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  response.headers.set('Pragma', 'no-cache');
+  response.headers.set('Expires', '0');
+  return response;
+}
 
 export const POST = rateLimiters.general(
   async (req: NextRequest, context: { params: Promise<{ token: string }> }) => {
@@ -44,13 +110,32 @@ export const POST = rateLimiters.general(
         timeZone,
       });
 
-      // Find event with attendee names
       const invite = await prisma.inviteToken.findUnique({
         where: { token },
         include: {
           event: {
             include: {
               attendeeNames: true,
+              attendeeSessions: {
+                where: { isActive: true },
+                select: {
+                  id: true,
+                  attendeeNameId: true,
+                  userId: true,
+                  sessionKey: true,
+                  displayName: true,
+                  timeZone: true,
+                  anonymousBlocks: true,
+                  hasSavedAvailability: true,
+                  attendeeName: {
+                    select: {
+                      id: true,
+                      label: true,
+                      slug: true,
+                    },
+                  },
+                },
+              },
             },
           },
         },
@@ -65,48 +150,41 @@ export const POST = rateLimiters.general(
       const userId = session?.user?.id;
       const currentSessionKey = await cookieManager.getSessionKey(event.id);
 
+      const attendeeNames = event.attendeeNames;
+      const activeSessions = (event.attendeeSessions || []).map(
+        normalizeSession
+      );
+
       // Validate attendee name exists - prefer attendeeNameId if provided, otherwise use nameSlug
-      let attendeeName;
-      if (attendeeNameId) {
-        attendeeName = event.attendeeNames.find(
-          name => name.id === attendeeNameId
-        );
-        debugLog('Join API: attendeeNameId lookup', {
+      const attendeeName = attendeeNameId
+        ? attendeeNames.find(name => name.id === attendeeNameId)
+        : nameSlug
+          ? attendeeNames.find(name => name.slug === nameSlug)
+          : undefined;
+
+      if (!attendeeName) {
+        debugLog('Join API: attendee name lookup failed', {
           attendeeNameId,
-          found: !!attendeeName,
-        });
-        if (!attendeeName) {
-          return NextResponse.json(
-            { error: 'Attendee name ID not found' },
-            { status: 404 }
-          );
-        }
-        // Verify the nameSlug matches the attendeeNameId (if both provided)
-        if (nameSlug && attendeeName.slug !== nameSlug) {
-          debugLog('Join API: name slug mismatch', {
-            expected: nameSlug,
-            actual: attendeeName.slug,
-          });
-          return NextResponse.json(
-            { error: 'Name slug does not match attendee name ID' },
-            { status: 400 }
-          );
-        }
-      } else if (nameSlug) {
-        attendeeName = event.attendeeNames.find(name => name.slug === nameSlug);
-        debugLog('Join API: nameSlug lookup', {
           nameSlug,
-          found: !!attendeeName,
         });
-        if (!attendeeName) {
-          return NextResponse.json(
-            { error: 'Name not found' },
-            { status: 404 }
-          );
-        }
-      } else {
         return NextResponse.json(
-          { error: 'Either attendeeNameId or nameSlug is required' },
+          {
+            error: attendeeNameId
+              ? 'Attendee name ID not found'
+              : 'Name not found',
+          },
+          { status: attendeeNameId ? 404 : 400 }
+        );
+      }
+
+      if (attendeeNameId && nameSlug && attendeeName.slug !== nameSlug) {
+        debugLog('Join API: name slug mismatch', {
+          expected: nameSlug,
+          actual: attendeeName.slug,
+        });
+        return NextResponse.json(
+          { error: 'Name slug does not match attendee name ID' },
+
           { status: 400 }
         );
       }
@@ -117,48 +195,93 @@ export const POST = rateLimiters.general(
         slug: attendeeName.slug,
       });
 
-      // Check if user is already joined
-      const currentSession = await getCurrentAttendeeSession(
-        event.id,
-        userId,
-        currentSessionKey || undefined
-      );
+      let currentSession =
+        (currentSessionKey
+          ? activeSessions.find(
+              session => session.sessionKey === currentSessionKey
+            )
+          : null) ||
+        (userId
+          ? activeSessions.find(session => session.userId === userId)
+          : null) ||
+        null;
 
-      // If user is already joined, allow them to switch names or rejoin
-      if (currentSession) {
-        if (currentSession.attendeeNameId === attendeeName.id) {
-          // Same name - just return success (they're already joined)
-          return NextResponse.json({
-            ok: true,
-            attendeeId: currentSession.id,
-            message: 'Already joined with this name',
-          });
+      if (!currentSession && (currentSessionKey || userId)) {
+        const fallbackSession = await getCurrentAttendeeSession(
+          event.id,
+          userId,
+          currentSessionKey || undefined
+        );
+        if (fallbackSession) {
+          currentSession = normalizeSession(fallbackSession);
+          activeSessions.push(currentSession);
         }
+      }
 
-        // Different name - deactivate current session and allow join with new name
+      const viewerUserId = userId ?? null;
+
+      const buildJoinResponse = (
+        attendeeSession: ActiveSession,
+        sessions: ActiveSession[],
+        mode: JoinSuccessResponse['mode'],
+        message?: string
+      ) =>
+        createSuccessResponse({
+          ok: true,
+          attendeeId: attendeeSession.id,
+          mode,
+          you: {
+            id: attendeeSession.id,
+            displayName: attendeeSession.displayName,
+            timeZone: attendeeSession.timeZone,
+            anonymousBlocks: attendeeSession.anonymousBlocks,
+            attendeeName: {
+              id: attendeeSession.attendeeName.id,
+              label: attendeeSession.attendeeName.label,
+              slug: attendeeSession.attendeeName.slug,
+            },
+          },
+          attendeeNames: buildAttendeeNameStatuses(
+            attendeeNames,
+            sessions,
+            viewerUserId
+          ),
+          initialBlocks: [],
+          yourVote: null,
+          message,
+        });
+
+      if (currentSession && currentSession.attendeeNameId === attendeeName.id) {
+        debugLog('Join API: user already joined with this name', {
+          sessionId: currentSession.id,
+        });
+
+        await cookieManager.setSessionKey(
+          currentSession.sessionKey,
+          userId ? 'user' : 'anonymous'
+        );
+        sessionManager.clearCache();
+
+        return buildJoinResponse(
+          currentSession,
+          activeSessions,
+          'already_joined',
+          'Already joined with this name'
+        );
+      }
+
+      if (currentSession) {
         await prisma.attendeeSession.update({
           where: { id: currentSession.id },
           data: { isActive: false },
         });
       }
 
-      // Check if name is already taken by an active session
-      const conflictingSession = await prisma.attendeeSession.findFirst({
-        where: {
-          eventId: event.id,
-          attendeeNameId: attendeeName.id,
-          isActive: true,
-          ...(currentSession ? { id: { not: currentSession.id } } : {}),
-        },
-        select: {
-          id: true,
-          attendeeName: {
-            select: { label: true },
-          },
-        },
-      });
+      const conflictingSession = activeSessions.find(
+        session => session.attendeeNameId === attendeeName.id
+      );
 
-      if (conflictingSession) {
+      if (conflictingSession && conflictingSession.id !== currentSession?.id) {
         return NextResponse.json(
           {
             error: `The name "${conflictingSession.attendeeName.label}" is currently taken. Please choose another name.`,
@@ -167,7 +290,6 @@ export const POST = rateLimiters.general(
         );
       }
 
-      // Create new session
       const sessionKey = generateSessionKey(userId, event.id);
 
       debugLog('Join API: creating new session', {
@@ -191,12 +313,19 @@ export const POST = rateLimiters.general(
         anonymousBlocks: true,
       });
 
+      const normalizedSession = normalizeSession(attendeeSession);
+
       debugLog('Join API: session created successfully', {
-        sessionId: attendeeSession.id,
-        attendeeNameId: attendeeSession.attendeeNameId,
+        sessionId: normalizedSession.id,
+        attendeeNameId: normalizedSession.attendeeNameId,
       });
 
-      // Set the cookie to this session
+      const updatedSessions = activeSessions
+        .filter(session => session.id !== currentSession?.id)
+        .filter(
+          session => session.attendeeNameId !== normalizedSession.attendeeNameId
+        );
+      updatedSessions.push(normalizedSession);
       await cookieManager.setSessionKey(
         sessionKey,
         userId ? 'user' : 'anonymous'
@@ -204,35 +333,30 @@ export const POST = rateLimiters.general(
 
       debugLog('Join API: session key stored in cookie');
 
-      // Clear session cache to prevent conflicts
       sessionManager.clearCache();
 
       await emit(event.id, 'attendee.joined', {
-        attendeeId: attendeeSession.id,
+        attendeeId: normalizedSession.id,
       });
 
       debugLog('Join API: emitted attendee.joined event');
 
-      // Proper cache invalidation using centralized system
       await invalidateEventOperationCache(token, 'join');
 
       debugLog('Join API: cache invalidated');
 
-      // Create response with cache-busting headers to prevent cookie contamination
-      const response = NextResponse.json({
-        ok: true,
-        attendeeId: attendeeSession.id,
-      });
+      const mode: JoinSuccessResponse['mode'] = currentSession
+        ? 'switched'
+        : 'created';
 
-      // Add headers to prevent caching and ensure fresh session
-      response.headers.set(
-        'Cache-Control',
-        'no-cache, no-store, must-revalidate'
+      return buildJoinResponse(
+        normalizedSession,
+        updatedSessions,
+        mode,
+        mode === 'switched'
+          ? `You've switched to "${normalizedSession.attendeeName.label}".`
+          : `You're now joining as "${normalizedSession.attendeeName.label}".`
       );
-      response.headers.set('Pragma', 'no-cache');
-      response.headers.set('Expires', '0');
-
-      return response;
     } catch (error) {
       console.error('Error joining event:', error);
       return NextResponse.json(

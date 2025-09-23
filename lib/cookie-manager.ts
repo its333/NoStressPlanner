@@ -192,9 +192,6 @@ export class CookieManager {
     // First, clear any existing attendee session cookies
     await this.clearAttendeeSessionCookies();
 
-    // Wait a moment to ensure cookies are cleared
-    await new Promise(resolve => setTimeout(resolve, 100));
-
     const cookieName =
       sessionType === 'user'
         ? this.ATTENDEE_SESSION_COOKIE

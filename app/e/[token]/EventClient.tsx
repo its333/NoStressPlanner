@@ -13,7 +13,6 @@ import PhaseBar from '@/components/PhaseBar';
 import PickNameCard from '@/components/PickNameCard';
 import ResultsCalendar from '@/components/ResultsCalendar';
 import { debugLog } from '@/lib/debug';
-import type { AttendeeNameStatus, JoinSuccessResponse } from '@/types/api';
 
 const PUSHER_KEY = process.env.NEXT_PUBLIC_PUSHER_KEY;
 const PUSHER_CLUSTER = process.env.NEXT_PUBLIC_PUSHER_CLUSTER;
@@ -44,12 +43,17 @@ interface ApiResponse {
       totalAttendees: number;
     }>;
   };
-  attendeeNames: AttendeeNameStatus[];
+  attendeeNames: Array<{
+    id: string;
+    label: string;
+    slug: string;
+    takenBy: string | null;
+    claimedByLoggedUser: boolean;
+  }>;
   you?: {
     id: string;
     displayName: string;
-    timeZone: string;
-    attendeeName: { id: string; label: string; slug: string };
+    attendeeName: { label: string };
     anonymousBlocks: boolean;
   };
   initialBlocks: string[];
@@ -72,8 +76,9 @@ interface ApiResponse {
 }
 
 export default function EventPageClient({ token }: { token: string }) {
+  const [refreshKey, setRefreshKey] = useState(0);
   const { data, mutate, isLoading } = useSWR<ApiResponse>(
-    `/api/events/${token}`
+    `/api/events/${token}?refresh=${refreshKey}`
   );
   const { data: session } = useSession();
   const [unavailableDates, setUnavailableDates] = useState<string[]>([]);
@@ -90,43 +95,11 @@ export default function EventPageClient({ token }: { token: string }) {
   );
   const [currentVote, setCurrentVote] = useState<boolean | null>(null);
 
-  const handleJoinSuccess = useCallback(
-    async (joinResult: JoinSuccessResponse) => {
-      debugLog('EventClient: join success payload received', {
-        attendeeId: joinResult.attendeeId,
-        hasYou: !!joinResult.you,
-      });
-
-      if (joinResult.mode === 'already_joined') {
-        await mutate();
-        return;
-      }
-
-      setUnavailableDates(joinResult.initialBlocks ?? []);
-      setCurrentVote(joinResult.yourVote ?? null);
-      setAnonymous(joinResult.you?.anonymousBlocks ?? true);
-
-      await mutate(
-        current => {
-          if (!current) {
-            return current;
-          }
-
-          return {
-            ...current,
-            attendeeNames: joinResult.attendeeNames,
-            you: joinResult.you,
-            initialBlocks: joinResult.initialBlocks ?? [],
-            yourVote: joinResult.yourVote ?? null,
-          };
-        },
-        { revalidate: false }
-      );
-
-      void mutate();
-    },
-    [mutate]
-  );
+  // Force refresh function
+  const forceRefresh = useCallback(() => {
+    debugLog('EventClient: force refresh triggered');
+    setRefreshKey(prev => prev + 1);
+  }, []);
   const [votingStatus, setVotingStatus] = useState<
     'idle' | 'voting' | 'success' | 'error'
   >('idle');
@@ -857,7 +830,11 @@ export default function EventPageClient({ token }: { token: string }) {
           token={token}
           attendeeNames={data.attendeeNames ?? []}
           defaultTz={browserTz}
-          onJoined={handleJoinSuccess}
+          onJoined={() => {
+            debugLog('EventClient: onJoined callback triggered');
+            // Use force refresh to ensure complete re-fetch
+            forceRefresh();
+          }}
         />
       )}
 

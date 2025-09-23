@@ -2,17 +2,20 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { debugLog } from '@/lib/debug';
-import type {
-  AttendeeNameStatus,
-  JoinResponse,
-  JoinSuccessResponse,
-} from '@/types/api';
+
+interface NameOption {
+  id: string;
+  label: string;
+  slug: string;
+  takenBy: string | null;
+  claimedByLoggedUser: boolean;
+}
 
 interface PickNameCardProps {
   token: string;
-  attendeeNames: AttendeeNameStatus[];
+  attendeeNames: NameOption[];
   defaultTz: string;
-  onJoined: (result: JoinSuccessResponse) => Promise<void> | void;
+  onJoined: () => void;
 }
 
 function getBrowserTimeZone(defaultTz: string) {
@@ -23,11 +26,6 @@ function getBrowserTimeZone(defaultTz: string) {
   }
 }
 
-function isJoinSuccess(
-  response: JoinResponse
-): response is JoinSuccessResponse {
-  return (response as JoinSuccessResponse).ok === true;
-}
 export default function PickNameCard({
   token,
   attendeeNames,
@@ -80,21 +78,20 @@ export default function PickNameCard({
         body: JSON.stringify(joinData),
       });
 
-      const responseData = (await res.json().catch(() => ({}))) as JoinResponse;
-
-      if (!res.ok || !isJoinSuccess(responseData)) {
-        const message =
-          'error' in responseData ? responseData.error : 'Failed to join';
-        console.error('Join failed:', responseData);
-        throw new Error(message);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        console.error('Join failed:', data);
+        throw new Error(data?.error ?? 'Failed to join');
       }
-
       debugLog('PickNameCard: join request succeeded', {
         status: res.status,
-        attendeeId: responseData.attendeeId,
+        ok: res.ok,
       });
 
-      await onJoined(responseData);
+      // Add a small delay to ensure cache invalidation has time to complete
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      onJoined();
       debugLog('PickNameCard: onJoined callback invoked');
     } catch (err) {
       console.error('Join error:', err);
@@ -105,8 +102,10 @@ export default function PickNameCard({
   }
 
   const current = attendeeNames.find(name => name.slug === slug);
-  const isTaken = !!current?.takenBy && !current?.claimedByLoggedUser;
-  const isClaimedByLoggedUser = !!current?.claimedByLoggedUser;
+  const isTaken =
+    current?.takenBy === 'taken' && current?.slug !== firstAvailable?.slug;
+  const isClaimedByLoggedUser =
+    current?.claimedByLoggedUser && current?.slug !== firstAvailable?.slug;
 
   // Debug logging for button state
   debugLog('PickNameCard: button state', {
@@ -162,20 +161,17 @@ export default function PickNameCard({
             }}
           >
             {attendeeNames.map(name => {
-              const optionClaimedByYou = name.claimedByLoggedUser;
-              const optionLocked = !!name.takenBy && !optionClaimedByYou;
-              const statusLabel = optionClaimedByYou
-                ? ' (claimed)'
-                : name.takenBy
-                  ? name.takenBy === 'claimed'
-                    ? ' (claimed)'
-                    : ' (taken)'
-                  : '';
-
+              const isTaken = name.takenBy === 'taken' && name.slug !== slug;
+              const isClaimedByLoggedUser =
+                name.claimedByLoggedUser && name.slug !== slug;
               return (
-                <option key={name.id} value={name.slug} disabled={optionLocked}>
+                <option key={name.id} value={name.slug} disabled={isTaken}>
                   {name.label}
-                  {name.slug === slug ? '' : statusLabel}
+                  {isClaimedByLoggedUser
+                    ? ' (claimed)'
+                    : isTaken
+                      ? ' (taken)'
+                      : ''}
                 </option>
               );
             })}

@@ -18,6 +18,8 @@ dist/
 .env.development.local
 .env.test.local
 .env.production.local
+# Allow .env.example for documentation
+!.env.example
 
 # Vercel
 .vercel

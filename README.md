@@ -22,6 +22,26 @@ Plan group activities without the fear of rejection. A modern web application bu
 
 ## Getting Started
 
+### Quick Setup for Codex
+
+If you're using Codex or need a quick setup:
+
+**Windows:**
+```bash
+setup-for-codex.bat
+```
+
+**Linux/Mac:**
+```bash
+./setup-for-codex.sh
+```
+
+This will automatically:
+- Create `.env.local` from `.env.example`
+- Install dependencies
+- Generate Prisma client
+- Set up basic configuration
+
 ### Prerequisites
 
 - Node.js 18+ 

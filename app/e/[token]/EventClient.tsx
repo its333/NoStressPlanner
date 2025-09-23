@@ -129,8 +129,15 @@ export default function EventPageClient({ token }: { token: string }) {
             if (!value.includes(`_${eventPrefix}_`)) {
               console.log('🔍 Found stale session cookie, clearing:', name, value.substring(0, 20) + '...');
               hasStaleCookie = true;
-              // Clear the stale cookie
+              // Clear the stale cookie with multiple strategies
+              // Strategy 1: Clear with no domain
               document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+              // Strategy 2: Clear with localhost domain
+              document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=localhost;`;
+              // Strategy 3: Clear with .localhost domain
+              document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=.localhost;`;
+              // Strategy 4: Set empty value with immediate expiration
+              document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; max-age=0;`;
             }
           }
         });

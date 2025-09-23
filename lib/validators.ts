@@ -36,6 +36,12 @@ export const joinEventSchema = z.object({
   nameSlug: z.string().min(1, 'Name slug required').max(50, 'Slug too long').regex(/^[a-zA-Z0-9_-]+$/, 'Invalid slug format'),
   displayName: z.string().min(1, 'Display name required').max(100, 'Display name too long').optional(),
   timeZone: z.string().max(50, 'Timezone too long').optional()
+}).refine((data) => {
+  // Either attendeeNameId or nameSlug must be provided
+  return data.attendeeNameId || data.nameSlug;
+}, {
+  message: "Either attendeeNameId or nameSlug must be provided",
+  path: ["attendeeNameId"]
 });
 
 // Switch name schema

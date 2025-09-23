@@ -11,11 +11,7 @@ import {
 } from '@/lib/attendees';
 import { auth } from '@/lib/auth';
 import { invalidateEventOperationCache } from '@/lib/cache-invalidation';
-import {
-  setSessionKey,
-  getSessionKey,
-  clearAttendeeSessionCookies,
-} from '@/lib/cookies';
+import { cookieManager } from '@/lib/cookie-manager';
 import { prisma } from '@/lib/prisma';
 import { rateLimiters } from '@/lib/rate-limiter';
 import { emit } from '@/lib/realtime';
@@ -30,6 +26,7 @@ export const POST = rateLimiters.general(
       const parsed = joinEventSchema.safeParse(json);
 
       if (!parsed.success) {
+        console.log('🔍 Join validation failed:', parsed.error.flatten());
         return NextResponse.json(
           { error: parsed.error.flatten() },
           { status: 400 }
@@ -65,7 +62,7 @@ export const POST = rateLimiters.general(
       const event = invite.event;
       const session = await auth();
       const userId = session?.user?.id;
-      const currentSessionKey = await getSessionKey(event.id);
+      const currentSessionKey = await cookieManager.getSessionKey(event.id);
 
       // Validate attendee name exists - prefer attendeeNameId if provided, otherwise use nameSlug
       let attendeeName;
@@ -158,7 +155,7 @@ export const POST = rateLimiters.general(
         timeZone: timeZone || 'UTC'
       });
 
-      await clearAttendeeSessionCookies();
+      await cookieManager.clearStaleSessionCookies(event.id);
 
       const attendeeSession = await createAttendeeSession({
         eventId: event.id,
@@ -176,7 +173,7 @@ export const POST = rateLimiters.general(
       });
 
       // Set the cookie to this session
-      await setSessionKey(sessionKey, userId ? 'user' : 'anonymous');
+      await cookieManager.setSessionKey(sessionKey, userId ? 'user' : 'anonymous');
       
       console.log('🔍 Session key set in cookie');
 

@@ -48,11 +48,17 @@ export default function PickNameCard({ token, attendeeNames, defaultTz, onJoined
         throw new Error('Selected name not found');
       }
       
-      console.log('Attempting to join with:', { attendeeNameId: selectedName.id, nameSlug: slug, displayName, timeZone });
+      const joinData = { attendeeNameId: selectedName.id, nameSlug: slug, displayName, timeZone };
+      console.log('🔍 Attempting to join with:', joinData);
+      console.log('🔍 Selected name:', selectedName);
+      console.log('🔍 Slug:', slug);
+      console.log('🔍 Display name:', displayName);
+      console.log('🔍 Time zone:', timeZone);
+      
       const res = await fetch(`/api/events/${token}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attendeeNameId: selectedName.id, nameSlug: slug, displayName, timeZone }),
+        body: JSON.stringify(joinData),
       });
 
       if (!res.ok) {
@@ -79,8 +85,18 @@ export default function PickNameCard({ token, attendeeNames, defaultTz, onJoined
   }
 
   const current = attendeeNames.find((name) => name.slug === slug);
-  const isTaken = Boolean(current?.takenBy) && current?.slug !== firstAvailable?.slug;
+  const isTaken = current?.takenBy === 'taken' && current?.slug !== firstAvailable?.slug;
   const isClaimedByLoggedUser = current?.claimedByLoggedUser && current?.slug !== firstAvailable?.slug;
+  
+  // Debug logging for button state
+  console.log('🔍 Button state debug:', {
+    current: current ? { slug: current.slug, takenBy: current.takenBy, claimedByLoggedUser: current.claimedByLoggedUser } : null,
+    isTaken,
+    isClaimedByLoggedUser,
+    loading,
+    firstAvailable: firstAvailable ? { slug: firstAvailable.slug } : null,
+    buttonDisabled: loading || isTaken
+  });
 
   return (
     <div className="card grid gap-6">
@@ -112,7 +128,7 @@ export default function PickNameCard({ token, attendeeNames, defaultTz, onJoined
             }}
           >
             {attendeeNames.map((name) => {
-              const isTaken = Boolean(name.takenBy) && name.slug !== slug;
+              const isTaken = name.takenBy === 'taken' && name.slug !== slug;
               const isClaimedByLoggedUser = name.claimedByLoggedUser && name.slug !== slug;
               return (
                 <option key={name.id} value={name.slug} disabled={isTaken}>

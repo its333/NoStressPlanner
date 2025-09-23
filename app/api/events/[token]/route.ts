@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { toUtcDate, eachDayInclusive } from '@/lib/time';
 import { getCurrentAttendeeSession } from '@/lib/attendees';
-import { getSessionKey } from '@/lib/cookies';
+import { cookieManager } from '@/lib/cookie-manager';
 import { emit } from '@/lib/realtime';
 import { computeAvailability } from '@/lib/results';
 import { eventCache } from '@/lib/intelligent-cache';
@@ -39,7 +39,7 @@ export const GET = monitorApiRoute(async (req: NextRequest, context: { params: P
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     }
 
-    const currentSessionKey = debugSessionKey || await getSessionKey(event.id);
+    const currentSessionKey = debugSessionKey || await cookieManager.getSessionKey(event.id);
     
     // Create session-specific cache key
     const userAgent = req.headers.get('user-agent') || 'unknown';

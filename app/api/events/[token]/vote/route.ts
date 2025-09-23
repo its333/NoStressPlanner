@@ -7,7 +7,7 @@ import { prisma } from '@/lib/prisma';
 import { auth } from '@/lib/auth';
 import { voteSchema } from '@/lib/validators';
 import { getCurrentAttendeeSession } from '@/lib/attendees';
-import { getSessionKey } from '@/lib/cookies';
+import { cookieManager } from '@/lib/cookie-manager';
 import { emit } from '@/lib/realtime';
 import { 
   ValidationError, 
@@ -78,16 +78,34 @@ export const POST = rateLimiters.voting(async (req: NextRequest, context: { para
       }
 
       const session = await auth();
-      const currentSessionKey = await getSessionKey(event.id);
+      const currentSessionKey = await cookieManager.getSessionKey(event.id);
       
       // Find current session
-      const currentSession = await getCurrentAttendeeSession(
+      let currentSession = await getCurrentAttendeeSession(
         event.id,
         session?.user?.id,
         currentSessionKey || undefined
       );
 
+      // If no session found but we have a session key, wait a bit and try again
+      // This handles the case where a session was just created but not yet available
+      if (!currentSession && currentSessionKey) {
+        console.log('🔍 No session found for vote, waiting 200ms and retrying...');
+        await new Promise(resolve => setTimeout(resolve, 200));
+        currentSession = await getCurrentAttendeeSession(
+          event.id,
+          session?.user?.id,
+          currentSessionKey || undefined
+        );
+      }
+
       if (!currentSession) {
+        console.log('🔍 Vote API: No session found after retry', {
+          eventId: event.id,
+          userId: session?.user?.id,
+          hasSessionKey: !!currentSessionKey,
+          sessionKeyPreview: currentSessionKey ? `${currentSessionKey.substring(0, 20)}...` : null
+        });
         throw new UnauthorizedError('Join the event before voting');
       }
 

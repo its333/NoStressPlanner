@@ -28,6 +28,14 @@ Plan group activities without the fear of rejection. A modern web application bu
 - pnpm (recommended) or npm
 - PostgreSQL database (or Supabase account)
 
+### Quick Start on Replit
+
+1. **Import to Replit**: Click "Import from GitHub" and use: `https://github.com/its333/NoStressPlanner.git`
+2. **Set up environment variables** in Replit's Secrets tab (see [REPLIT_SETUP.md](REPLIT_SETUP.md) for details)
+3. **Run the application**: The `.replit` file will automatically handle setup and start the server
+
+For detailed Replit setup instructions, see [REPLIT_SETUP.md](REPLIT_SETUP.md).
+
 ### Installation
 
 1. Clone the repository:

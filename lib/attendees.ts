@@ -1,6 +1,7 @@
 // lib/attendees.ts
 // Updated attendee management for the new schema
 
+import { debugLog } from '@/lib/debug';
 import { prisma } from '@/lib/prisma';
 
 interface LookupParams {
@@ -9,81 +10,94 @@ interface LookupParams {
   userId?: string;
 }
 
-export async function findAttendeeSession({ eventId, sessionKey, userId }: LookupParams) {
+export async function findAttendeeSession({
+  eventId,
+  sessionKey,
+  userId,
+}: LookupParams) {
   try {
-    console.log('🔍 findAttendeeSession called:', {
+    debugLog('Attendees: findAttendeeSession called', {
       eventId: eventId ? `${eventId.substring(0, 20)}...` : null,
       hasSessionKey: !!sessionKey,
-      sessionKeyPreview: sessionKey ? `${sessionKey.substring(0, 20)}...` : null,
-      hasUserId: !!userId
+      sessionKeyPreview: sessionKey
+        ? `${sessionKey.substring(0, 20)}...`
+        : null,
+      hasUserId: !!userId,
     });
-    
+
     // PRIORITY 1: ALWAYS prioritize sessionKey if available (prevents cross-browser conflicts)
     if (sessionKey) {
-      console.log('🔍 Searching for session with exact key:', {
+      debugLog('Attendees: searching for session with exact key', {
         eventId: eventId.substring(0, 20) + '...',
         sessionKey: sessionKey.substring(0, 30) + '...',
-        fullSessionKey: sessionKey
+        fullSessionKey: sessionKey,
       });
-      
+
       // First, let's see all sessions for this event
       const allSessions = await prisma.attendeeSession.findMany({
         where: { eventId, isActive: true },
-        select: { id: true, sessionKey: true, displayName: true }
+        select: { id: true, sessionKey: true, displayName: true },
       });
-      console.log('🔍 All active sessions for this event:', allSessions.map(s => ({
-        id: s.id,
-        displayName: s.displayName,
-        sessionKey: s.sessionKey.substring(0, 30) + '...',
-        matches: s.sessionKey === sessionKey
-      })));
-      
+      debugLog(
+        'Attendees: active sessions for event',
+        allSessions.map(s => ({
+          id: s.id,
+          displayName: s.displayName,
+          sessionKey: s.sessionKey.substring(0, 30) + '...',
+          matches: s.sessionKey === sessionKey,
+        }))
+      );
+
       // Only look for attendee sessions with custom session keys (not NextAuth tokens)
       const sessionAttendee = await prisma.attendeeSession.findFirst({
-        where: { 
-          eventId, 
+        where: {
+          eventId,
           sessionKey,
-          isActive: true
+          isActive: true,
         },
-        include: { 
+        include: {
           attendeeName: true,
-          user: true
+          user: true,
         },
       });
-      console.log('🔍 Session lookup result:', {
+      debugLog('Attendees: session lookup result', {
         found: !!sessionAttendee,
         sessionId: sessionAttendee?.id,
         displayName: sessionAttendee?.displayName,
         attendeeNameId: sessionAttendee?.attendeeNameId,
-        sessionKeyType: sessionKey.startsWith('user_') ? 'user' : sessionKey.startsWith('anon_') ? 'anonymous' : 'unknown'
+        sessionKeyType: sessionKey.startsWith('user_')
+          ? 'user'
+          : sessionKey.startsWith('anon_')
+            ? 'anonymous'
+            : 'unknown',
       });
       if (sessionAttendee) return sessionAttendee;
     }
-    
+
     // PRIORITY 2: userId fallback for logged-in users (allows shared sessions across browsers)
     if (userId) {
       const userSession = await prisma.attendeeSession.findFirst({
-        where: { 
-          eventId, 
+        where: {
+          eventId,
           userId,
-          isActive: true
+          isActive: true,
         },
-        include: { 
+        include: {
           attendeeName: true,
-          user: true
+          user: true,
         },
       });
-      console.log('🔍 User ID lookup result:', {
+      debugLog('Attendees: user ID lookup result', {
         found: !!userSession,
         sessionId: userSession?.id,
         displayName: userSession?.displayName,
-        attendeeNameId: userSession?.attendeeNameId
+        attendeeNameId: userSession?.attendeeNameId,
       });
       if (userSession) return userSession;
     }
 
     // No session found
-    console.log('🔍 No session found for this event');
+    debugLog('Attendees: no session found for this event');
     return null;
   } catch (error) {
     console.error('Error in findAttendeeSession:', error);
@@ -91,22 +105,26 @@ export async function findAttendeeSession({ eventId, sessionKey, userId }: Looku
   }
 }
 
-export async function getCurrentAttendeeSession(eventId: string, userId?: string, sessionKey?: string) {
+export async function getCurrentAttendeeSession(
+  eventId: string,
+  userId?: string,
+  sessionKey?: string
+) {
   try {
-    console.log('🔍 getCurrentAttendeeSession called:', {
+    debugLog('Attendees: getCurrentAttendeeSession called', {
       eventId,
       userId: userId ? `${userId.substring(0, 8)}...` : 'none',
-      sessionKey: sessionKey ? `${sessionKey.substring(0, 20)}...` : 'none'
+      sessionKey: sessionKey ? `${sessionKey.substring(0, 20)}...` : 'none',
     });
 
     const session = await findAttendeeSession({ eventId, userId, sessionKey });
-    
-    console.log('🔍 getCurrentAttendeeSession result:', {
+
+    debugLog('Attendees: getCurrentAttendeeSession result', {
       found: !!session,
       sessionId: session?.id,
       displayName: session?.displayName,
       attendeeNameId: session?.attendeeNameId,
-      isActive: session?.isActive
+      isActive: session?.isActive,
     });
 
     return session;
@@ -123,7 +141,7 @@ export async function createAttendeeSession({
   sessionKey,
   displayName,
   timeZone,
-  anonymousBlocks = true
+  anonymousBlocks = true,
 }: {
   eventId: string;
   attendeeNameId: string;
@@ -139,9 +157,9 @@ export async function createAttendeeSession({
       where: {
         eventId,
         userId,
-        isActive: true
+        isActive: true,
       },
-      data: { isActive: false }
+      data: { isActive: false },
     });
   }
 
@@ -155,19 +173,19 @@ export async function createAttendeeSession({
       displayName,
       timeZone,
       anonymousBlocks,
-      isActive: true
+      isActive: true,
     },
     include: {
       attendeeName: true,
-      user: true
-    }
+      user: true,
+    },
   });
 }
 
 export async function switchAttendeeSessionName({
   currentSessionId,
   newAttendeeNameId,
-  displayName
+  displayName,
 }: {
   currentSessionId: string;
   newAttendeeNameId: string;
@@ -177,37 +195,37 @@ export async function switchAttendeeSessionName({
     where: { id: currentSessionId },
     data: {
       attendeeNameId: newAttendeeNameId,
-      displayName
+      displayName,
     },
     include: {
       attendeeName: true,
-      user: true
-    }
+      user: true,
+    },
   });
 }
 
 export async function deactivateAttendeeSession(sessionId: string) {
   return await prisma.attendeeSession.update({
     where: { id: sessionId },
-    data: { isActive: false }
+    data: { isActive: false },
   });
 }
 
 // Helper function to generate event-specific session keys
 export function generateSessionKey(userId?: string, eventId?: string): string {
   const crypto = require('crypto');
-  
+
   // Generate cryptographically secure random components
   const timestamp = Date.now();
   const randomBytes = crypto.randomBytes(16).toString('hex'); // 32 characters
   const browserId = crypto.randomBytes(8).toString('hex'); // 16 characters
-  
+
   // Add a browser fingerprint to make each browser completely unique
   const browserFingerprint = crypto.randomBytes(4).toString('hex'); // 8 characters
-  
+
   // CRITICAL: Include eventId to make session keys event-specific
   const eventPrefix = eventId ? eventId.substring(0, 8) : 'global';
-  
+
   if (userId) {
     // For logged-in users: include userId but make it unique per browser and event
     return `user_${userId}_${eventPrefix}_${browserId}_${browserFingerprint}_${timestamp}_${randomBytes}`;

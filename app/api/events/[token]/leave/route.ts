@@ -1,12 +1,17 @@
 export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
+
+import { getCurrentAttendeeSession } from '@/lib/attendees';
 import { auth } from '@/lib/auth';
 import { getSessionKey } from '@/lib/cookies';
-import { getCurrentAttendeeSession } from '@/lib/attendees';
+import { debugLog } from '@/lib/debug';
+import { prisma } from '@/lib/prisma';
 import { emit } from '@/lib/realtime';
 
-export async function DELETE(_req: NextRequest, context: { params: Promise<{ token: string }> }) {
+export async function DELETE(
+  _req: NextRequest,
+  context: { params: Promise<{ token: string }> }
+) {
   const { token } = await context.params;
 
   const invite = await prisma.inviteToken.findUnique({
@@ -27,14 +32,17 @@ export async function DELETE(_req: NextRequest, context: { params: Promise<{ tok
   );
 
   if (!attendeeSession) {
-    return NextResponse.json({ error: 'Not currently joined to this event' }, { status: 404 });
+    return NextResponse.json(
+      { error: 'Not currently joined to this event' },
+      { status: 404 }
+    );
   }
 
-  console.log('Leaving event - deactivating session:', {
+  debugLog('Leave API: deactivating session', {
     sessionId: attendeeSession.id,
     attendeeNameId: attendeeSession.attendeeNameId,
     userId: attendeeSession.userId,
-    sessionKey: sessionKey ? `${sessionKey.substring(0, 8)}...` : 'none'
+    sessionKey: sessionKey ? `${sessionKey.substring(0, 8)}...` : 'none',
   });
 
   // Deactivate the session instead of deleting it

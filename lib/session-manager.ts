@@ -1,7 +1,9 @@
 // lib/session-manager.ts
 // Professional session management with robust error handling and fallback mechanisms
-import { auth } from './auth';
 import { NextRequest } from 'next/server';
+
+import { auth } from './auth';
+import { debugLog } from './debug';
 import { logger } from './logger';
 
 export interface SessionInfo {
@@ -20,7 +22,10 @@ export interface HostDetectionResult {
 }
 
 class SessionManager {
-  private sessionCache = new Map<string, { data: SessionInfo; timestamp: number }>();
+  private sessionCache = new Map<
+    string,
+    { data: SessionInfo; timestamp: number }
+  >();
   private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   /**
@@ -30,52 +35,61 @@ class SessionManager {
     // Create a more specific cache key that includes user agent and IP
     const cookieHeader = req?.headers?.get('cookie') || '';
     const userAgent = req?.headers?.get('user-agent') || '';
-    const ip = req?.headers?.get('x-forwarded-for') || req?.headers?.get('x-real-ip') || 'unknown';
-    
+    const ip =
+      req?.headers?.get('x-forwarded-for') ||
+      req?.headers?.get('x-real-ip') ||
+      'unknown';
+
     // Create a unique cache key per browser/session
     const cacheKey = `${cookieHeader.substring(0, 50)}_${userAgent.substring(0, 20)}_${ip}`;
-    
+
     // Check cache first (with proper isolation)
     const cached = this.sessionCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
-      logger.debug('Session cache hit', { 
+      logger.debug('Session cache hit', {
         cacheKey: cacheKey.substring(0, 30) + '...',
-        userId: cached.data.userId ? cached.data.userId.substring(0, 8) + '...' : null
+        userId: cached.data.userId
+          ? cached.data.userId.substring(0, 8) + '...'
+          : null,
       });
       return cached.data;
     }
 
-    logger.debug('Session cache miss - fetching fresh data', { 
-      cacheKey: cacheKey.substring(0, 30) + '...' 
+    logger.debug('Session cache miss - fetching fresh data', {
+      cacheKey: cacheKey.substring(0, 30) + '...',
     });
 
     let sessionInfo: SessionInfo = {
       isAuthenticated: false,
-      fallbackUsed: false
+      fallbackUsed: false,
     };
 
     try {
       // Primary method: NextAuth session
       const session = await auth();
-      console.log('🔍 NextAuth session check:', {
+      debugLog('SessionManager: NextAuth session check', {
         hasSession: !!session,
         hasUser: !!session?.user,
         userId: session?.user?.id,
-        sessionKeys: session ? Object.keys(session) : []
+        sessionKeys: session ? Object.keys(session) : [],
       });
-      
+
       if (session?.user?.id) {
         sessionInfo = {
           userId: session.user.id,
           isAuthenticated: true,
-          fallbackUsed: false
+          fallbackUsed: false,
         };
-        logger.debug('Session obtained via NextAuth', { userId: session.user.id });
+        logger.debug('Session obtained via NextAuth', {
+          userId: session.user.id,
+        });
       } else {
-        console.log('🔍 No NextAuth session found - user not logged in');
+        debugLog('SessionManager: no NextAuth session found');
       }
     } catch (error) {
-      logger.warn('NextAuth session failed, using fallback methods', { error: error instanceof Error ? error.message : 'Unknown error' });
+      logger.warn('NextAuth session failed, using fallback methods', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
       sessionInfo.error = 'JWT session error';
       sessionInfo.fallbackUsed = true;
       logger.debug('Session obtained via NextAuth fallback');
@@ -84,13 +98,15 @@ class SessionManager {
     // Cache the result for future requests
     this.sessionCache.set(cacheKey, {
       data: sessionInfo,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     });
 
-    logger.debug('Session data cached', { 
+    logger.debug('Session data cached', {
       cacheKey: cacheKey.substring(0, 30) + '...',
-      userId: sessionInfo.userId ? sessionInfo.userId.substring(0, 8) + '...' : null,
-      isAuthenticated: sessionInfo.isAuthenticated
+      userId: sessionInfo.userId
+        ? sessionInfo.userId.substring(0, 8) + '...'
+        : null,
+      isAuthenticated: sessionInfo.isAuthenticated,
     });
 
     return sessionInfo;
@@ -109,20 +125,27 @@ class SessionManager {
    */
   clearSessionCache(cacheKey: string): void {
     this.sessionCache.delete(cacheKey);
-    logger.debug('Session cache cleared for key', { cacheKey: cacheKey.substring(0, 30) + '...' });
+    logger.debug('Session cache cleared for key', {
+      cacheKey: cacheKey.substring(0, 30) + '...',
+    });
   }
 
   /**
    * Comprehensive host detection with multiple fallback methods
    */
   async detectHost(
-    eventHostId: string, 
+    eventHostId: string,
     eventHostName: string,
     attendeeUserId?: string,
     attendeeDisplayName?: string,
     sessionKey?: string
   ): Promise<HostDetectionResult> {
-    const methods: Array<{ method: HostDetectionResult['method']; isHost: boolean; confidence: HostDetectionResult['confidence']; details: Record<string, any> }> = [];
+    const methods: Array<{
+      method: HostDetectionResult['method'];
+      isHost: boolean;
+      confidence: HostDetectionResult['confidence'];
+      details: Record<string, any>;
+    }> = [];
 
     // Method 1: Direct session user ID match (highest confidence)
     if (attendeeUserId === eventHostId) {
@@ -130,38 +153,49 @@ class SessionManager {
         method: 'session',
         isHost: true,
         confidence: 'high',
-        details: { attendeeUserId, eventHostId }
+        details: { attendeeUserId, eventHostId },
       });
     }
 
-    // Method 2: Session key contains host ID prefix (high confidence)
-    if (sessionKey && sessionKey.includes('user_') && sessionKey.includes(eventHostId.substring(0, 8))) {
-      methods.push({
-        method: 'sessionKey',
-        isHost: true,
-        confidence: 'high',
-        details: { sessionKeyPrefix: sessionKey.substring(0, 20) + '...', hostIdPrefix: eventHostId.substring(0, 8) }
-      });
-    }
+    if (sessionKey && sessionKey.startsWith('user_')) {
+      const sessionParts = sessionKey.split('_');
+      const keyUserId = sessionParts[1];
+      const keyEventPrefix = sessionParts[2];
 
-    // Method 3: Event creation pattern in session key (medium confidence)
-    if (sessionKey && sessionKey.includes('user_') && sessionKey.includes(eventHostId.substring(0, 8))) {
-      methods.push({
-        method: 'eventCreation',
-        isHost: true,
-        confidence: 'medium',
-        details: { sessionKeyPattern: 'user_*', hostIdPrefix: eventHostId.substring(0, 8) }
-      });
+      if (keyUserId && keyUserId === eventHostId) {
+        methods.push({
+          method: 'sessionKey',
+          isHost: true,
+          confidence: 'high',
+          details: { sessionKeyPreview: sessionKey.substring(0, 20) + '...' },
+        });
+      } else if (
+        keyEventPrefix &&
+        keyEventPrefix === eventHostId.substring(0, 8)
+      ) {
+        methods.push({
+          method: 'eventCreation',
+          isHost: true,
+          confidence: 'medium',
+          details: {
+            sessionKeyPreview: sessionKey.substring(0, 20) + '...',
+            hostIdPrefix: eventHostId.substring(0, 8),
+          },
+        });
+      }
     }
 
     // Method 4: Display name match (low confidence, but useful fallback)
-    if (attendeeDisplayName && eventHostName && 
-        attendeeDisplayName.toLowerCase() === eventHostName.toLowerCase()) {
+    if (
+      attendeeDisplayName &&
+      eventHostName &&
+      attendeeDisplayName.toLowerCase() === eventHostName.toLowerCase()
+    ) {
       methods.push({
         method: 'nameMatch',
         isHost: true,
         confidence: 'low',
-        details: { attendeeDisplayName, eventHostName }
+        details: { attendeeDisplayName, eventHostName },
       });
     }
 
@@ -175,7 +209,7 @@ class SessionManager {
       logger.debug('Host detection successful', {
         method: bestMethod.method,
         confidence: bestMethod.confidence,
-        details: bestMethod.details
+        details: bestMethod.details,
       });
       return bestMethod;
     }
@@ -186,14 +220,14 @@ class SessionManager {
       eventHostName,
       attendeeUserId,
       attendeeDisplayName,
-      hasSessionKey: !!sessionKey
+      hasSessionKey: !!sessionKey,
     });
 
     return {
       isHost: false,
       method: 'session',
       confidence: 'low',
-      details: { reason: 'No matching methods found' }
+      details: { reason: 'No matching methods found' },
     };
   }
 
@@ -205,8 +239,8 @@ class SessionManager {
       size: this.sessionCache.size,
       entries: Array.from(this.sessionCache.keys()).map(key => ({
         key: key.substring(0, 20) + '...',
-        age: Date.now() - this.sessionCache.get(key)!.timestamp
-      }))
+        age: Date.now() - this.sessionCache.get(key)!.timestamp,
+      })),
     };
   }
 }

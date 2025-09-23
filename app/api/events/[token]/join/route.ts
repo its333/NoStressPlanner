@@ -36,7 +36,15 @@ export const POST = rateLimiters.general(
         );
       }
 
-      const { nameSlug, displayName, timeZone } = parsed.data;
+      const { attendeeNameId, nameSlug, displayName, timeZone } = parsed.data;
+      
+      console.log('🔍 Join API Debug:', {
+        token: token.substring(0, 10) + '...',
+        attendeeNameId,
+        nameSlug,
+        displayName,
+        timeZone
+      });
 
       // Find event with attendee names
       const invite = await prisma.inviteToken.findUnique({
@@ -59,13 +67,34 @@ export const POST = rateLimiters.general(
       const userId = session?.user?.id;
       const currentSessionKey = await getSessionKey(event.id);
 
-      // Validate attendee name exists first
-      const attendeeName = event.attendeeNames.find(
-        name => name.slug === nameSlug
-      );
-      if (!attendeeName) {
-        return NextResponse.json({ error: 'Name not found' }, { status: 404 });
+      // Validate attendee name exists - prefer attendeeNameId if provided, otherwise use nameSlug
+      let attendeeName;
+      if (attendeeNameId) {
+        attendeeName = event.attendeeNames.find(name => name.id === attendeeNameId);
+        console.log('🔍 Looking for attendeeNameId:', attendeeNameId, 'Found:', !!attendeeName);
+        if (!attendeeName) {
+          return NextResponse.json({ error: 'Attendee name ID not found' }, { status: 404 });
+        }
+        // Verify the nameSlug matches the attendeeNameId (if both provided)
+        if (nameSlug && attendeeName.slug !== nameSlug) {
+          console.log('🔍 Name slug mismatch:', { expected: nameSlug, actual: attendeeName.slug });
+          return NextResponse.json({ error: 'Name slug does not match attendee name ID' }, { status: 400 });
+        }
+      } else if (nameSlug) {
+        attendeeName = event.attendeeNames.find(name => name.slug === nameSlug);
+        console.log('🔍 Looking for nameSlug:', nameSlug, 'Found:', !!attendeeName);
+        if (!attendeeName) {
+          return NextResponse.json({ error: 'Name not found' }, { status: 404 });
+        }
+      } else {
+        return NextResponse.json({ error: 'Either attendeeNameId or nameSlug is required' }, { status: 400 });
       }
+      
+      console.log('🔍 Selected attendee name:', {
+        id: attendeeName.id,
+        label: attendeeName.label,
+        slug: attendeeName.slug
+      });
 
       // Check if user is already joined
       const currentSession = await getCurrentAttendeeSession(
@@ -119,6 +148,15 @@ export const POST = rateLimiters.general(
 
       // Create new session
       const sessionKey = generateSessionKey(userId, event.id);
+      
+      console.log('🔍 Creating new session:', {
+        eventId: event.id,
+        attendeeNameId: attendeeName.id,
+        userId,
+        sessionKey: sessionKey.substring(0, 30) + '...',
+        displayName: displayName || attendeeName.label,
+        timeZone: timeZone || 'UTC'
+      });
 
       await clearAttendeeSessionCookies();
 
@@ -131,9 +169,16 @@ export const POST = rateLimiters.general(
         timeZone: timeZone || 'UTC',
         anonymousBlocks: true,
       });
+      
+      console.log('🔍 Session created successfully:', {
+        sessionId: attendeeSession.id,
+        attendeeNameId: attendeeSession.attendeeNameId
+      });
 
       // Set the cookie to this session
       await setSessionKey(sessionKey, userId ? 'user' : 'anonymous');
+      
+      console.log('🔍 Session key set in cookie');
 
       // Clear session cache to prevent conflicts
       sessionManager.clearCache();
@@ -141,9 +186,13 @@ export const POST = rateLimiters.general(
       await emit(event.id, 'attendee.joined', {
         attendeeId: attendeeSession.id,
       });
+      
+      console.log('🔍 Emitted attendee.joined event');
 
       // Proper cache invalidation using centralized system
       await invalidateEventOperationCache(token, 'join');
+      
+      console.log('🔍 Cache invalidated');
 
       // Create response with cache-busting headers to prevent cookie contamination
       const response = NextResponse.json({

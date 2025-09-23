@@ -1,0 +1,168 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id               String            @id @default(cuid())
+  name             String?
+  email            String?           @unique
+  emailVerified    DateTime?
+  image            String?
+  discordId        String?           @unique
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  accounts         Account[]
+  attendeeSessions AttendeeSession[]
+  events           Event[]           @relation("EventHost")
+  sessions         Session[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Event {
+  id                    String            @id @default(cuid())
+  hostId                String
+  title                 String
+  description           String?
+  startDate             DateTime
+  endDate               DateTime
+  voteDeadline          DateTime
+  quorum                Int
+  requireLoginToAttend  Boolean           @default(false)
+  phase                 EventPhase        @default(VOTE)
+  finalDate             DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  showResultsToEveryone Boolean           @default(false)
+  attendeeNames         AttendeeName[]
+  attendeeSessions      AttendeeSession[]
+  blocks                DayBlock[]
+  host                  User              @relation("EventHost", fields: [hostId], references: [id])
+  invite                InviteToken?
+  votes                 Vote[]
+
+  @@index([phase])
+  @@index([hostId])
+  @@index([createdAt])
+}
+
+model InviteToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  eventId   String   @unique
+  createdAt DateTime @default(now())
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+}
+
+model AttendeeName {
+  id               String            @id @default(cuid())
+  eventId          String
+  label            String
+  slug             String
+  createdAt        DateTime          @default(now())
+  event            Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  attendeeSessions AttendeeSession[]
+  blocks           DayBlock[]
+  votes            Vote[]
+
+  @@unique([eventId, slug])
+}
+
+model AttendeeSession {
+  id              String       @id @default(cuid())
+  eventId         String
+  attendeeNameId  String
+  userId          String?
+  sessionKey      String
+  displayName     String
+  timeZone        String
+  anonymousBlocks Boolean      @default(true)
+  isActive        Boolean      @default(true)
+  hasSavedAvailability Boolean @default(false)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  attendeeName    AttendeeName @relation(fields: [attendeeNameId], references: [id], onDelete: Cascade)
+  event           Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user            User?        @relation(fields: [userId], references: [id])
+
+  @@unique([eventId, sessionKey])
+  // Removed @@unique([eventId, userId, isActive]) to allow multiple active sessions per user across different browsers
+  @@index([eventId, isActive])
+  @@index([userId, isActive])
+  @@index([attendeeNameId])
+  @@index([sessionKey]) // Added for faster lookups
+}
+
+model Vote {
+  eventId        String
+  in             Boolean
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  attendeeNameId String
+  attendeeName   AttendeeName @relation(fields: [attendeeNameId], references: [id], onDelete: Cascade)
+  event          Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, attendeeNameId])
+  @@index([eventId, in])
+  @@index([attendeeNameId])
+}
+
+model DayBlock {
+  eventId        String
+  date           DateTime
+  anonymous      Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  attendeeNameId String
+  attendeeName   AttendeeName @relation(fields: [attendeeNameId], references: [id], onDelete: Cascade)
+  event          Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@id([eventId, attendeeNameId, date])
+  @@index([eventId, date])
+  @@index([attendeeNameId])
+}
+
+enum EventPhase {
+  VOTE
+  PICK_DAYS
+  FINALIZED
+  FAILED
+  RESULTS
+}

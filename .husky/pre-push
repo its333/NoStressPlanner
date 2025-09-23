@@ -1,0 +1,35 @@
+// .husky/pre-push
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Pre-push validation
+echo "🚀 Running pre-push checks..."
+
+# Run full test suite
+echo "🧪 Running full test suite..."
+npx vitest run
+
+if [ $? -ne 0 ]; then
+  echo "❌ Tests failed! Please fix failing tests before pushing."
+  exit 1
+fi
+
+# Run E2E tests
+echo "🎭 Running E2E tests..."
+npx playwright test
+
+if [ $? -ne 0 ]; then
+  echo "❌ E2E tests failed! Please fix failing tests before pushing."
+  exit 1
+fi
+
+# Run build check
+echo "🏗️ Running build check..."
+npm run build
+
+if [ $? -ne 0 ]; then
+  echo "❌ Build failed! Please fix build errors before pushing."
+  exit 1
+fi
+
+echo "✅ All pre-push checks passed!"

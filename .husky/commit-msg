@@ -1,0 +1,28 @@
+// .husky/commit-msg
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Commit message validation
+echo "📝 Validating commit message..."
+
+# Get commit message
+COMMIT_MSG=$(cat "$1")
+
+# Check commit message format
+if ! echo "$COMMIT_MSG" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\(.+\))?: .+'; then
+  echo "❌ Invalid commit message format!"
+  echo ""
+  echo "Commit message should follow the format:"
+  echo "  <type>(<scope>): <description>"
+  echo ""
+  echo "Types: feat, fix, docs, style, refactor, perf, test, chore, ci, build, revert"
+  echo "Examples:"
+  echo "  feat: add user authentication"
+  echo "  fix(api): resolve session handling issue"
+  echo "  docs: update README with setup instructions"
+  echo ""
+  echo "Your message: $COMMIT_MSG"
+  exit 1
+fi
+
+echo "✅ Commit message format is valid!"

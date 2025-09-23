@@ -12,6 +12,7 @@ import {
 import { auth } from '@/lib/auth';
 import { invalidateEventOperationCache } from '@/lib/cache-invalidation';
 import { cookieManager } from '@/lib/cookie-manager';
+import { debugLog } from '@/lib/debug';
 import { prisma } from '@/lib/prisma';
 import { rateLimiters } from '@/lib/rate-limiter';
 import { emit } from '@/lib/realtime';
@@ -26,7 +27,7 @@ export const POST = rateLimiters.general(
       const parsed = joinEventSchema.safeParse(json);
 
       if (!parsed.success) {
-        console.log('🔍 Join validation failed:', parsed.error.flatten());
+        debugLog('Join API: validation failed', parsed.error.flatten());
         return NextResponse.json(
           { error: parsed.error.flatten() },
           { status: 400 }
@@ -34,13 +35,13 @@ export const POST = rateLimiters.general(
       }
 
       const { attendeeNameId, nameSlug, displayName, timeZone } = parsed.data;
-      
-      console.log('🔍 Join API Debug:', {
+
+      debugLog('Join API: request received', {
         token: token.substring(0, 10) + '...',
         attendeeNameId,
         nameSlug,
         displayName,
-        timeZone
+        timeZone,
       });
 
       // Find event with attendee names
@@ -67,30 +68,53 @@ export const POST = rateLimiters.general(
       // Validate attendee name exists - prefer attendeeNameId if provided, otherwise use nameSlug
       let attendeeName;
       if (attendeeNameId) {
-        attendeeName = event.attendeeNames.find(name => name.id === attendeeNameId);
-        console.log('🔍 Looking for attendeeNameId:', attendeeNameId, 'Found:', !!attendeeName);
+        attendeeName = event.attendeeNames.find(
+          name => name.id === attendeeNameId
+        );
+        debugLog('Join API: attendeeNameId lookup', {
+          attendeeNameId,
+          found: !!attendeeName,
+        });
         if (!attendeeName) {
-          return NextResponse.json({ error: 'Attendee name ID not found' }, { status: 404 });
+          return NextResponse.json(
+            { error: 'Attendee name ID not found' },
+            { status: 404 }
+          );
         }
         // Verify the nameSlug matches the attendeeNameId (if both provided)
         if (nameSlug && attendeeName.slug !== nameSlug) {
-          console.log('🔍 Name slug mismatch:', { expected: nameSlug, actual: attendeeName.slug });
-          return NextResponse.json({ error: 'Name slug does not match attendee name ID' }, { status: 400 });
+          debugLog('Join API: name slug mismatch', {
+            expected: nameSlug,
+            actual: attendeeName.slug,
+          });
+          return NextResponse.json(
+            { error: 'Name slug does not match attendee name ID' },
+            { status: 400 }
+          );
         }
       } else if (nameSlug) {
         attendeeName = event.attendeeNames.find(name => name.slug === nameSlug);
-        console.log('🔍 Looking for nameSlug:', nameSlug, 'Found:', !!attendeeName);
+        debugLog('Join API: nameSlug lookup', {
+          nameSlug,
+          found: !!attendeeName,
+        });
         if (!attendeeName) {
-          return NextResponse.json({ error: 'Name not found' }, { status: 404 });
+          return NextResponse.json(
+            { error: 'Name not found' },
+            { status: 404 }
+          );
         }
       } else {
-        return NextResponse.json({ error: 'Either attendeeNameId or nameSlug is required' }, { status: 400 });
+        return NextResponse.json(
+          { error: 'Either attendeeNameId or nameSlug is required' },
+          { status: 400 }
+        );
       }
-      
-      console.log('🔍 Selected attendee name:', {
+
+      debugLog('Join API: selected attendee name', {
         id: attendeeName.id,
         label: attendeeName.label,
-        slug: attendeeName.slug
+        slug: attendeeName.slug,
       });
 
       // Check if user is already joined
@@ -145,14 +169,14 @@ export const POST = rateLimiters.general(
 
       // Create new session
       const sessionKey = generateSessionKey(userId, event.id);
-      
-      console.log('🔍 Creating new session:', {
+
+      debugLog('Join API: creating new session', {
         eventId: event.id,
         attendeeNameId: attendeeName.id,
         userId,
         sessionKey: sessionKey.substring(0, 30) + '...',
         displayName: displayName || attendeeName.label,
-        timeZone: timeZone || 'UTC'
+        timeZone: timeZone || 'UTC',
       });
 
       await cookieManager.clearStaleSessionCookies(event.id);
@@ -166,16 +190,19 @@ export const POST = rateLimiters.general(
         timeZone: timeZone || 'UTC',
         anonymousBlocks: true,
       });
-      
-      console.log('🔍 Session created successfully:', {
+
+      debugLog('Join API: session created successfully', {
         sessionId: attendeeSession.id,
-        attendeeNameId: attendeeSession.attendeeNameId
+        attendeeNameId: attendeeSession.attendeeNameId,
       });
 
       // Set the cookie to this session
-      await cookieManager.setSessionKey(sessionKey, userId ? 'user' : 'anonymous');
-      
-      console.log('🔍 Session key set in cookie');
+      await cookieManager.setSessionKey(
+        sessionKey,
+        userId ? 'user' : 'anonymous'
+      );
+
+      debugLog('Join API: session key stored in cookie');
 
       // Clear session cache to prevent conflicts
       sessionManager.clearCache();
@@ -183,13 +210,13 @@ export const POST = rateLimiters.general(
       await emit(event.id, 'attendee.joined', {
         attendeeId: attendeeSession.id,
       });
-      
-      console.log('🔍 Emitted attendee.joined event');
+
+      debugLog('Join API: emitted attendee.joined event');
 
       // Proper cache invalidation using centralized system
       await invalidateEventOperationCache(token, 'join');
-      
-      console.log('🔍 Cache invalidated');
+
+      debugLog('Join API: cache invalidated');
 
       // Create response with cache-busting headers to prevent cookie contamination
       const response = NextResponse.json({

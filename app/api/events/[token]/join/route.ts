@@ -184,6 +184,7 @@ export const POST = rateLimiters.general(
         });
         return NextResponse.json(
           { error: 'Name slug does not match attendee name ID' },
+
           { status: 400 }
         );
       }
@@ -325,7 +326,6 @@ export const POST = rateLimiters.general(
           session => session.attendeeNameId !== normalizedSession.attendeeNameId
         );
       updatedSessions.push(normalizedSession);
-
       await cookieManager.setSessionKey(
         sessionKey,
         userId ? 'user' : 'anonymous'

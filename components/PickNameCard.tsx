@@ -28,7 +28,6 @@ function isJoinSuccess(
 ): response is JoinSuccessResponse {
   return (response as JoinSuccessResponse).ok === true;
 }
-
 export default function PickNameCard({
   token,
   attendeeNames,

@@ -36,7 +36,6 @@ export const GET = monitorApiRoute(
         sessionManager.getSessionInfo(req),
         getEventDataUltraOptimized(token),
       ]);
-
       if (!event) {
         return NextResponse.json({ error: 'Event not found' }, { status: 404 });
       }
@@ -63,6 +62,7 @@ export const GET = monitorApiRoute(
 
       // Data already fetched by optimized query - no additional DB calls needed!
       const attendeeSessions = event.attendeeSessions || [];
+      
       const attendeeSessionByNameId = new Map<
         string,
         (typeof attendeeSessions)[number]

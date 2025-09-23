@@ -1,17 +1,12 @@
 // lib/auth.ts
 // NextAuth configuration with proper session cookies
-import NextAuth from 'next-auth';
+import NextAuth, { type Session } from 'next-auth';
 import Discord from 'next-auth/providers/discord';
 
-export const {
-  handlers: { GET, POST },
-  auth,
-  signIn,
-  signOut,
-} = NextAuth({
+const nextAuth = NextAuth({
   // Remove PrismaAdapter for JWT strategy - they are incompatible
   secret: process.env.NEXTAUTH_SECRET,
-  session: { 
+  session: {
     strategy: 'jwt', // Switch back to JWT for better client-side compatibility
     maxAge: 30 * 24 * 60 * 60, // 30 days
     updateAge: 24 * 60 * 60, // 24 hours
@@ -56,25 +51,25 @@ export const {
       if (url.includes('/host') || url.includes('callbackUrl=/host')) {
         return `${baseUrl}/host`;
       }
-      
+
       // Otherwise, redirect to home page
       return `${baseUrl}/`;
     },
     async jwt({ token, user, account }) {
-      console.log('🔍 JWT Callback:', { 
-        hasToken: !!token, 
+      console.log('🔍 JWT Callback:', {
+        hasToken: !!token,
         hasUser: !!user,
         userId: user?.id,
         userName: user?.name,
-        tokenKeys: token ? Object.keys(token) : []
+        tokenKeys: token ? Object.keys(token) : [],
       });
-      
+
       // Initial sign in
       if (account && user) {
-        console.log('🔍 JWT Initial Sign In:', { 
-          userId: user.id, 
+        console.log('🔍 JWT Initial Sign In:', {
+          userId: user.id,
           userName: user.name,
-          provider: account.provider
+          provider: account.provider,
         });
         return {
           ...token,
@@ -86,18 +81,18 @@ export const {
           emailVerified: new Date(), // Set email as verified for Discord
         };
       }
-      
+
       return token;
     },
     async session({ session, token }) {
-      console.log('🔍 Session Callback:', { 
-        hasSession: !!session, 
+      console.log('🔍 Session Callback:', {
+        hasSession: !!session,
         hasToken: !!token,
         userId: token?.id,
         userName: token?.name,
-        tokenKeys: token ? Object.keys(token) : []
+        tokenKeys: token ? Object.keys(token) : [],
       });
-      
+
       try {
         if (token) {
           session.user = {
@@ -108,10 +103,10 @@ export const {
             discordId: token.discordId as string,
             emailVerified: token.emailVerified as Date,
           };
-          console.log('🔍 Session Created:', { 
-            userId: session.user.id, 
+          console.log('🔍 Session Created:', {
+            userId: session.user.id,
             name: session.user.name,
-            sessionKeys: Object.keys(session)
+            sessionKeys: Object.keys(session),
           });
         } else {
           console.log('🔍 Session Callback: No token provided');
@@ -123,28 +118,28 @@ export const {
       }
     },
     async signIn({ user, account }) {
-      console.log('🔍 SignIn Callback:', { 
-        userId: user.id, 
+      console.log('🔍 SignIn Callback:', {
+        userId: user.id,
         userName: user.name,
-        provider: account?.provider
+        provider: account?.provider,
       });
       return true;
     },
   },
   events: {
     async signIn({ user, account, isNewUser }) {
-      console.log('🔍 SignIn Event:', { 
-        userId: user.id, 
+      console.log('🔍 SignIn Event:', {
+        userId: user.id,
         userName: user.name,
         provider: account?.provider,
-        isNewUser 
+        isNewUser,
       });
     },
     async session({ session, token }) {
-      console.log('🔍 Session Event:', { 
+      console.log('🔍 Session Event:', {
         hasSession: !!session,
         hasToken: !!token,
-        userId: session?.user?.id
+        userId: session?.user?.id,
       });
     },
   },
@@ -155,3 +150,41 @@ export const {
     }),
   ],
 });
+
+export const {
+  handlers: { GET, POST },
+  signIn,
+  signOut,
+} = nextAuth;
+
+const baseAuth = nextAuth.auth;
+
+const TEST_BYPASS_ENABLED =
+  process.env.NODE_ENV !== 'production' &&
+  process.env.TEST_AUTH_BYPASS === 'true';
+
+export const auth: typeof baseAuth = async (...args) => {
+  if (TEST_BYPASS_ENABLED) {
+    console.warn(
+      'TEST_AUTH_BYPASS enabled - returning mock session for testing purposes'
+    );
+    const userId = process.env.TEST_AUTH_USER_ID ?? 'test-user';
+    const now = Date.now();
+    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+    const session: Session = {
+      user: {
+        id: userId,
+        name: process.env.TEST_AUTH_USER_NAME ?? 'Test User',
+        email: process.env.TEST_AUTH_USER_EMAIL ?? `${userId}@example.com`,
+        image: process.env.TEST_AUTH_USER_IMAGE ?? null,
+        discordId: process.env.TEST_AUTH_DISCORD_ID ?? userId,
+        emailVerified: new Date(now),
+      },
+      expires: new Date(now + thirtyDaysMs).toISOString(),
+    };
+
+    return session;
+  }
+
+  return baseAuth(...args);
+};

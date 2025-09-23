@@ -100,10 +100,11 @@ export default function EventPageClient({ token }: { token: string }) {
   const [showFinalDateConfirm, setShowFinalDateConfirm] = useState(false);
   const [showNameSwitchModal, setShowNameSwitchModal] = useState(false);
   const [nameSwitchError, setNameSwitchError] = useState<string | null>(null);
+  const [browserTz, setBrowserTz] = useState<string>('UTC');
 
   const needsLogin = data?.event.requireLoginToAttend && !session?.user?.id;
   const needsJoin = !data?.you && !needsLogin;
-  
+
   // EventClient state management
 
   useEffect(() => {
@@ -145,6 +146,17 @@ export default function EventPageClient({ token }: { token: string }) {
       clearStaleCookies();
     }
   }, [data?.initialBlocks, data?.yourVote, data?.event?.showResultsToEveryone, data?.event?.id]);
+
+  useEffect(() => {
+    try {
+      const resolved = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (resolved) {
+        setBrowserTz(resolved);
+      }
+    } catch {
+      // Ignore timezone resolution failures and keep default UTC fallback
+    }
+  }, []);
 
   // Real-time updates with fallback system
   useEffect(() => {
@@ -566,7 +578,6 @@ export default function EventPageClient({ token }: { token: string }) {
     }
   }, [data?.isHost, token, mutate]);
 
-  const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const voteDeadline = data?.phaseSummary.voteDeadline ? new Date(data.phaseSummary.voteDeadline) : null;
   const voteClosed = voteDeadline ? isAfter(new Date(), voteDeadline) : false;
   const canVote = data?.event.phase === 'VOTE' || data?.event.phase === 'PICK_DAYS';

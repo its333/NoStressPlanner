@@ -25,10 +25,14 @@ function getBrowserTimeZone(defaultTz: string) {
 }
 
 export default function PickNameCard({ token, attendeeNames, defaultTz, onJoined }: PickNameCardProps) {
-  const firstAvailable = useMemo(() => attendeeNames.find((name) => !name.takenBy) ?? attendeeNames[0], [attendeeNames]);
+  const firstAvailable = useMemo(
+    () => attendeeNames.find((name) => !name.takenBy) ?? attendeeNames[0],
+    [attendeeNames]
+  );
   const [slug, setSlug] = useState(firstAvailable?.slug ?? '');
   const [displayName, setDisplayName] = useState(firstAvailable?.label ?? '');
-  const [timeZone, setTimeZone] = useState(getBrowserTimeZone(defaultTz));
+  const [timeZone, setTimeZone] = useState(defaultTz);
+  const [hasManualTimeZone, setHasManualTimeZone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -38,6 +42,12 @@ export default function PickNameCard({ token, attendeeNames, defaultTz, onJoined
       setDisplayName(firstAvailable?.label ?? '');
     }
   }, [attendeeNames, firstAvailable, slug]);
+
+  useEffect(() => {
+    if (!hasManualTimeZone) {
+      setTimeZone(getBrowserTimeZone(defaultTz));
+    }
+  }, [defaultTz, hasManualTimeZone]);
 
   async function join() {
     setLoading(true);
@@ -146,7 +156,10 @@ export default function PickNameCard({ token, attendeeNames, defaultTz, onJoined
             id="timeZone"
             className="input"
             value={timeZone}
-            onChange={(event) => setTimeZone(event.target.value)}
+            onChange={(event) => {
+              setHasManualTimeZone(true);
+              setTimeZone(event.target.value);
+            }}
           >
             {/* Show detected timezone first if it's not in our common list */}
             {![

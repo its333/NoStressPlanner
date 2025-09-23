@@ -18,7 +18,9 @@ if [ ! -f ".env.local" ]; then
     
     # Generate a random NextAuth secret
     NEXTAUTH_SECRET=$(openssl rand -base64 32 2>/dev/null || echo "fallback-secret-$(date +%s)")
-    sed -i.bak "s/your-nextauth-secret-here/$NEXTAUTH_SECRET/" .env.local
+    # Safely escape the secret for sed replacement
+    ESCAPED_SECRET="${NEXTAUTH_SECRET//\//\\/}"
+    sed -i.bak "s/your-nextauth-secret-here/$ESCAPED_SECRET/" .env.local
     rm .env.local.bak 2>/dev/null || true
     
     echo "✅ Created .env.local with generated secrets"

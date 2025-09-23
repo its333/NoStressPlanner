@@ -147,6 +147,7 @@ export default function PickNameCard({
           </label>
           <select
             id='nameOption'
+            name='nameOption'
             className='input'
             value={slug}
             onChange={event => {
@@ -186,6 +187,7 @@ export default function PickNameCard({
           </label>
           <input
             id='displayName'
+            name='displayName'
             className='input'
             value={displayName}
             onChange={event => setDisplayName(event.target.value)}
@@ -286,6 +288,7 @@ export default function PickNameCard({
           className='btn-primary flex items-center justify-center gap-2 py-3'
           onClick={join}
           disabled={loading || isTaken}
+          data-testid='join-event-button'
         >
           {loading ? (
             <>

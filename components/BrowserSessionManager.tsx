@@ -71,13 +71,15 @@ export function BrowserSessionManager() {
     // Intercept fetch requests to add browser ID header
     const originalFetch = window.fetch;
     window.fetch = async (input, init) => {
-      const headers = new Headers(init?.headers);
+      const headers = new Headers(init?.headers ?? undefined);
       headers.set('X-Browser-Session-ID', browserId);
 
-      return originalFetch(input, {
+      const nextInit: RequestInit = {
         ...init,
         headers,
-      });
+      };
+
+      return originalFetch.call(window, input as RequestInfo, nextInit);
     };
 
     debugLog('BrowserSessionManager: interceptor configured', { browserId });

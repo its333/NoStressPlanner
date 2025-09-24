@@ -233,8 +233,9 @@ export const GET = monitorApiRoute(
       // Calculate availability progress for host visibility
       const availabilityProgress = {
         totalEligible: inCount, // People who voted "I'm in!"
-        completedAvailability: new Set<string>(), // People who have explicitly saved their availability
-        notSetYet: new Set<string>(), // People who voted "I'm in!" but haven't saved availability yet
+        completedAvailability: 0, // Count of people who have explicitly saved their availability
+        notSetYet: 0, // Count of people who voted "I'm in!" but haven't saved availability yet
+        isComplete: false,
       };
 
       // Find who has explicitly saved their availability
@@ -254,11 +255,14 @@ export const GET = monitorApiRoute(
         const nameId = attendeeNameId as string;
         // Consider someone as having completed availability if they have explicitly saved
         if (attendeesWhoHaveSavedAvailability.has(nameId)) {
-          availabilityProgress.completedAvailability.add(nameId);
+          availabilityProgress.completedAvailability++;
         } else {
-          availabilityProgress.notSetYet.add(nameId);
+          availabilityProgress.notSetYet++;
         }
       });
+
+      // Set completion status
+      availabilityProgress.isComplete = availabilityProgress.completedAvailability === availabilityProgress.totalEligible;
 
       // Get attendee details for display (show ALL people who voted "I'm in!")
       const attendeeDetails = Array.from(inIds).map(attendeeNameId => {

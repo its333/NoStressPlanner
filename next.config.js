@@ -16,7 +16,7 @@ const nextConfig = {
           {
             key: 'Content-Security-Policy',
             value:
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.pusher.com; object-src 'none'; base-uri 'self';",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.pusher.com https://vercel.live; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.pusherapp.com https://sockjs.pusher.com https://ws.pusherapp.com; frame-src 'self'; object-src 'none'; base-uri 'self';",
           },
         ],
       },

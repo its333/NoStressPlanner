@@ -140,12 +140,20 @@ class SecurityService {
       }
 
       // Verify session ID matches (if provided)
+      // Allow 'anonymous' tokens to work for authenticated users (more lenient)
       if (sessionId && tokenData.sessionId !== sessionId) {
-        logger.warn('CSRF validation failed: session ID mismatch', {
-          expected: sessionId.substring(0, 8) + '...',
-          actual: tokenData.sessionId.substring(0, 8) + '...',
-        });
-        return false;
+        // If user is authenticated but token was generated for anonymous, allow it
+        if (sessionId !== 'anonymous' && tokenData.sessionId === 'anonymous') {
+          logger.debug('CSRF validation: allowing anonymous token for authenticated user', {
+            userId: sessionId.substring(0, 8) + '...',
+          });
+        } else {
+          logger.warn('CSRF validation failed: session ID mismatch', {
+            expected: sessionId.substring(0, 8) + '...',
+            actual: tokenData.sessionId.substring(0, 8) + '...',
+          });
+          return false;
+        }
       }
 
       logger.debug('CSRF token validated successfully', {

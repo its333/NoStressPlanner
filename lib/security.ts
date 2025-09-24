@@ -48,7 +48,7 @@ class SecurityService {
 
     const directives = [
       "default-src 'self'",
-      `script-src 'self' 'unsafe-eval' ${isProduction ? '' : "'unsafe-inline'"} https://js.pusher.com`,
+      `script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.pusher.com`,
       `style-src 'self' 'unsafe-inline'`,
       `img-src 'self' data: https:`,
       `font-src 'self' data:`,

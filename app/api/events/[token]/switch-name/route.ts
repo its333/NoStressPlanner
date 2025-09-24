@@ -23,7 +23,7 @@ export const POST = rateLimiters.general(
       const { token } = await context.params;
       const body = await req.json();
       debugLog('Switch-name API: request received', body);
-      
+
       const parsed = switchNameSchema.safeParse(body);
       if (!parsed.success) {
         debugLog('Switch-name API: validation failed', parsed.error.flatten());
@@ -38,19 +38,19 @@ export const POST = rateLimiters.general(
       // Get event with all necessary data
       const invite = await prisma.inviteToken.findUnique({
         where: { token },
-        include: { 
-          event: { 
-            include: { 
+        include: {
+          event: {
+            include: {
               attendeeNames: true,
               attendeeSessions: {
                 where: { isActive: true },
-                include: { attendeeName: true }
-              }
-            } 
-          } 
+                include: { attendeeName: true },
+              },
+            },
+          },
         },
       });
-      
+
       if (!invite?.event) {
         return NextResponse.json({ error: 'Event not found' }, { status: 404 });
       }
@@ -60,7 +60,9 @@ export const POST = rateLimiters.general(
       const userId = session?.user?.id;
 
       // Find the new attendee name
-      const newAttendeeName = event.attendeeNames.find(name => name.id === newNameId);
+      const newAttendeeName = event.attendeeNames.find(
+        name => name.id === newNameId
+      );
       if (!newAttendeeName) {
         return NextResponse.json(
           { error: 'Invalid attendee name' },
@@ -85,7 +87,7 @@ export const POST = rateLimiters.general(
 
       // Find current session
       let currentSession = null;
-      
+
       if (userId) {
         // Logged-in user: find their session
         currentSession = activeSessions.find(s => s.userId === userId);
@@ -93,9 +95,13 @@ export const POST = rateLimiters.general(
         // Anonymous user: find session by selected person
         const selectedPerson = await getSelectedPerson(event.id, req);
         if (selectedPerson) {
-          const selectedAttendeeName = event.attendeeNames.find(name => name.slug === selectedPerson);
+          const selectedAttendeeName = event.attendeeNames.find(
+            name => name.slug === selectedPerson
+          );
           if (selectedAttendeeName) {
-            currentSession = activeSessions.find(s => s.attendeeNameId === selectedAttendeeName.id);
+            currentSession = activeSessions.find(
+              s => s.attendeeNameId === selectedAttendeeName.id
+            );
           }
         }
       }
@@ -123,7 +129,10 @@ export const POST = rateLimiters.general(
             id: name.id,
             label: name.label,
             slug: name.slug,
-            takenBy: activeSessions.find(s => s.attendeeNameId === name.id)?.userId ? 'claimed' : null,
+            takenBy: activeSessions.find(s => s.attendeeNameId === name.id)
+              ?.userId
+              ? 'claimed'
+              : null,
           })),
         });
       }
@@ -131,7 +140,7 @@ export const POST = rateLimiters.general(
       // Update the session to use the new name
       const updatedSession = await prisma.attendeeSession.update({
         where: { id: currentSession.id },
-        data: { 
+        data: {
           attendeeNameId: newNameId,
           updatedAt: new Date(),
         },
@@ -154,7 +163,10 @@ export const POST = rateLimiters.general(
           newName: newAttendeeName.label,
         });
       } catch (emitError) {
-        debugLog('Switch-name API: failed to emit attendee.nameChanged event', emitError);
+        debugLog(
+          'Switch-name API: failed to emit attendee.nameChanged event',
+          emitError
+        );
       }
 
       // Invalidate cache
@@ -181,10 +193,12 @@ export const POST = rateLimiters.general(
           id: name.id,
           label: name.label,
           slug: name.slug,
-          takenBy: activeSessions.find(s => s.attendeeNameId === name.id)?.userId ? 'claimed' : null,
+          takenBy: activeSessions.find(s => s.attendeeNameId === name.id)
+            ?.userId
+            ? 'claimed'
+            : null,
         })),
       });
-
     } catch (error) {
       debugLog('Switch-name API: error occurred', error);
       return NextResponse.json(

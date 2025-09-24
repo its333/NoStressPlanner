@@ -5,23 +5,29 @@
 
 import { cookies } from 'next/headers';
 
-export async function getSelectedPerson(eventId: string, _req?: any): Promise<string | null> {
+export async function getSelectedPerson(
+  eventId: string,
+  _req?: any
+): Promise<string | null> {
   try {
-    console.log('🍪 Getting selected person cookie for event:', eventId.substring(0, 8));
-    
+    console.log(
+      '🍪 Getting selected person cookie for event:',
+      eventId.substring(0, 8)
+    );
+
     const cookieStore = await cookies();
-    
+
     // Use a simple cookie name without browser hash for now
     const cookieName = `selected-person-${eventId.substring(0, 8)}`;
     const selectedPerson = cookieStore.get(cookieName)?.value || null;
-    
-    console.log('🍪 Get selected person cookie result:', { 
-      eventId: eventId.substring(0, 8), 
+
+    console.log('🍪 Get selected person cookie result:', {
+      eventId: eventId.substring(0, 8),
       cookieName,
       selectedPerson,
-      allCookies: cookieStore.getAll().map(c => c.name)
+      allCookies: cookieStore.getAll().map(c => c.name),
     });
-    
+
     return selectedPerson;
   } catch (error) {
     console.error('🍪 Failed to get cookie:', error);
@@ -29,12 +35,19 @@ export async function getSelectedPerson(eventId: string, _req?: any): Promise<st
   }
 }
 
-export async function setSelectedPerson(eventId: string, personSlug: string, _req?: any): Promise<void> {
+export async function setSelectedPerson(
+  eventId: string,
+  personSlug: string,
+  _req?: any
+): Promise<void> {
   try {
-    console.log('🍪 Setting selected person cookie:', { eventId: eventId.substring(0, 8), personSlug });
-    
+    console.log('🍪 Setting selected person cookie:', {
+      eventId: eventId.substring(0, 8),
+      personSlug,
+    });
+
     const cookieStore = await cookies();
-    
+
     // Use a simple cookie name without browser hash for now
     const cookieName = `selected-person-${eventId.substring(0, 8)}`;
 
@@ -58,15 +71,23 @@ export async function clearSelectedPerson(eventId: string): Promise<void> {
   const cookieName = `selected-person-${eventId.substring(0, 8)}`;
 
   cookieStore.delete(cookieName);
-  console.log('🍪 Cleared selected person cookie for event:', eventId.substring(0, 8));
+  console.log(
+    '🍪 Cleared selected person cookie for event:',
+    eventId.substring(0, 8)
+  );
 }
 
 // Legacy functions for backward compatibility (can be removed later)
-export async function getPreferredName(eventId: string): Promise<string | null> {
+export async function getPreferredName(
+  eventId: string
+): Promise<string | null> {
   return getSelectedPerson(eventId);
 }
 
-export async function setPreferredName(eventId: string, nameSlug: string): Promise<void> {
+export async function setPreferredName(
+  eventId: string,
+  nameSlug: string
+): Promise<void> {
   return setSelectedPerson(eventId, nameSlug);
 }
 

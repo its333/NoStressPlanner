@@ -4,7 +4,6 @@
 export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getSelectedPerson } from '@/lib/simple-cookies';
 import { debugLog } from '@/lib/debug';
 import { handleNextApiError } from '@/lib/error-handling';
 import { eventCache } from '@/lib/intelligent-cache';
@@ -13,6 +12,7 @@ import { prisma } from '@/lib/prisma';
 import { emit } from '@/lib/realtime';
 import { computeAvailability } from '@/lib/results';
 import { sessionManager } from '@/lib/session-manager';
+import { getSelectedPerson } from '@/lib/simple-cookies';
 import { toUtcDate, eachDayInclusive } from '@/lib/time';
 import { getEventDataUltraOptimized } from '@/lib/ultra-optimized-queries';
 
@@ -32,20 +32,27 @@ export const GET = monitorApiRoute(
       // Fetch session information and event data concurrently
       const sessionInfo = await sessionManager.getSessionInfo(req);
       const event = await getEventDataUltraOptimized(token);
-      
+
       if (!event) {
         return NextResponse.json({ error: 'Event not found' }, { status: 404 });
       }
 
       const selectedPerson = await getSelectedPerson(event.id, req);
-      
+
       // Create browser-specific cache key using request headers for better isolation
       const userAgent = req.headers.get('user-agent') || '';
-      const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || '';
-      const browserFingerprint = `${userAgent.substring(0, 50)}_${ip}`.replace(/[^a-zA-Z0-9_]/g, '_');
-      
+      const ip =
+        req.headers.get('x-forwarded-for') ||
+        req.headers.get('x-real-ip') ||
+        '';
+      const browserFingerprint = `${userAgent.substring(0, 50)}_${ip}`.replace(
+        /[^a-zA-Z0-9_]/g,
+        '_'
+      );
+
       // Create user-specific cache key to prevent cross-user contamination
-      const userIdentifier = sessionInfo.userId || selectedPerson || `anon_${browserFingerprint}`;
+      const userIdentifier =
+        sessionInfo.userId || selectedPerson || `anon_${browserFingerprint}`;
       const eventCacheKey = `event_data:${token}:${userIdentifier}`;
 
       // Check intelligent cache first (unless cache bust requested)
@@ -70,7 +77,7 @@ export const GET = monitorApiRoute(
 
       // Data already fetched by optimized query - no additional DB calls needed!
       const attendeeSessions = event.attendeeSessions || [];
-      
+
       const attendeeSessionByNameId = new Map<
         string,
         (typeof attendeeSessions)[number]
@@ -128,15 +135,24 @@ export const GET = monitorApiRoute(
       // Resolve the viewer session from the already-fetched attendee sessions
       // Simple person detection - no complex session management needed
       let you = null;
-      
+
       if (sessionInfo.userId) {
         // Logged-in user: find their attendee session
-        you = attendeeSessions.find((session: any) => session.userId === sessionInfo.userId) || null;
+        you =
+          attendeeSessions.find(
+            (session: any) => session.userId === sessionInfo.userId
+          ) || null;
       } else if (selectedPerson) {
         // Anonymous user: find the person they selected
-        const selectedAttendeeName = event.attendeeNames?.find(name => name.slug === selectedPerson);
+        const selectedAttendeeName = event.attendeeNames?.find(
+          name => name.slug === selectedPerson
+        );
         if (selectedAttendeeName) {
-          you = attendeeSessions.find((session: any) => session.attendeeNameId === selectedAttendeeName.id) || null;
+          you =
+            attendeeSessions.find(
+              (session: any) =>
+                session.attendeeNameId === selectedAttendeeName.id
+            ) || null;
         }
       }
 
@@ -147,7 +163,11 @@ export const GET = monitorApiRoute(
           hasSelectedPerson: !!selectedPerson,
           selectedPerson,
         },
-        detectionMethod: sessionInfo.userId ? 'userId' : selectedPerson ? 'selectedPerson' : 'none',
+        detectionMethod: sessionInfo.userId
+          ? 'userId'
+          : selectedPerson
+            ? 'selectedPerson'
+            : 'none',
         you: you
           ? {
               id: you.id,
@@ -274,8 +294,8 @@ export const GET = monitorApiRoute(
         };
       });
 
-        // Get selected person for anonymous users (UX only)
-        const preferredName = !sessionInfo.userId ? selectedPerson : null;
+      // Get selected person for anonymous users (UX only)
+      const preferredName = !sessionInfo.userId ? selectedPerson : null;
 
       const responseData = {
         event: {
@@ -368,8 +388,8 @@ export const GET = monitorApiRoute(
             }
           : null,
         isHost: finalIsHost,
-        initialBlocks: yourBlocks.map((date: any) =>
-          toUtcDate(date).toISOString().split('T')[0]
+        initialBlocks: yourBlocks.map(
+          (date: any) => toUtcDate(date).toISOString().split('T')[0]
         ),
         yourVote: yourVote ? yourVote.in : null,
       };

@@ -20,7 +20,7 @@ export const POST = rateLimiters.voting(
       const { token } = await context.params;
       const json = await req.json();
       debugLog('Blocks API: request received', json);
-      
+
       const parsed = blocksSchema.safeParse(json);
       if (!parsed.success) {
         debugLog('Blocks API: validation failed', parsed.error.flatten());
@@ -41,10 +41,10 @@ export const POST = rateLimiters.voting(
               attendeeNames: true,
               attendeeSessions: {
                 where: { isActive: true },
-                include: { attendeeName: true }
-              }
-            }
-          }
+                include: { attendeeName: true },
+              },
+            },
+          },
         },
       });
 
@@ -58,7 +58,7 @@ export const POST = rateLimiters.voting(
 
       // Find the attendee session for the current user
       let attendeeSession = null;
-      
+
       if (userId) {
         // Logged-in user: find their session
         attendeeSession = event.attendeeSessions.find(s => s.userId === userId);
@@ -66,9 +66,13 @@ export const POST = rateLimiters.voting(
         // Anonymous user: find session by selected person
         const selectedPerson = await getSelectedPerson(event.id, req);
         if (selectedPerson) {
-          const selectedAttendeeName = event.attendeeNames.find(name => name.slug === selectedPerson);
+          const selectedAttendeeName = event.attendeeNames.find(
+            name => name.slug === selectedPerson
+          );
           if (selectedAttendeeName) {
-            attendeeSession = event.attendeeSessions.find(s => s.attendeeNameId === selectedAttendeeName.id);
+            attendeeSession = event.attendeeSessions.find(
+              s => s.attendeeNameId === selectedAttendeeName.id
+            );
           }
         }
       }
@@ -91,11 +95,15 @@ export const POST = rateLimiters.voting(
       // Validate dates are within event range
       const eventStart = toUtcDate(event.startDate);
       const eventEnd = toUtcDate(event.endDate);
-      
-      const invalidDates = dates.filter(date => !isWithinRange(toUtcDate(date), eventStart, eventEnd));
+
+      const invalidDates = dates.filter(
+        date => !isWithinRange(toUtcDate(date), eventStart, eventEnd)
+      );
       if (invalidDates.length > 0) {
         return NextResponse.json(
-          { error: `Some dates are outside the event range: ${invalidDates.join(', ')}` },
+          {
+            error: `Some dates are outside the event range: ${invalidDates.join(', ')}`,
+          },
           { status: 400 }
         );
       }
@@ -110,9 +118,9 @@ export const POST = rateLimiters.voting(
 
       // Delete existing blocks for this attendee
       await prisma.dayBlock.deleteMany({
-        where: { 
+        where: {
           eventId: event.id,
-          attendeeNameId: attendeeSession.attendeeNameId 
+          attendeeNameId: attendeeSession.attendeeNameId,
         },
       });
 
@@ -134,7 +142,7 @@ export const POST = rateLimiters.voting(
       // Update attendee session's anonymous blocks preference and mark as having saved availability
       await prisma.attendeeSession.update({
         where: { id: attendeeSession.id },
-        data: { 
+        data: {
           anonymousBlocks: anonymous ?? attendeeSession.anonymousBlocks,
           hasSavedAvailability: true, // Mark that this person has saved their availability
         },
@@ -153,10 +161,12 @@ export const POST = rateLimiters.voting(
 
       // Invalidate cache
       try {
-        debugLog('Blocks API: attempting cache invalidation', { token: token.substring(0, 8) + '...' });
+        debugLog('Blocks API: attempting cache invalidation', {
+          token: token.substring(0, 8) + '...',
+        });
         await invalidateEventOperationCache(token, 'block');
         debugLog('Blocks API: cache invalidated successfully');
-        
+
         // Small delay to ensure cache invalidation propagates
         await new Promise(resolve => setTimeout(resolve, 50));
       } catch (cacheError) {
@@ -177,7 +187,6 @@ export const POST = rateLimiters.voting(
           anonymous: anonymous ?? attendeeSession.anonymousBlocks,
         },
       });
-
     } catch (error) {
       debugLog('Blocks API: error occurred', error);
       return NextResponse.json(

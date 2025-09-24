@@ -100,7 +100,9 @@ export const POST = rateLimiters.general(
 
     // Invalidate cache to ensure all clients get updated data
     try {
-      const { invalidateEventOperationCache } = await import('@/lib/cache-invalidation');
+      const { invalidateEventOperationCache } = await import(
+        '@/lib/cache-invalidation'
+      );
       await invalidateEventOperationCache(token, 'final');
     } catch (cacheError) {
       console.warn('Failed to invalidate cache:', cacheError);

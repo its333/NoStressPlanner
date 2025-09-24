@@ -8,6 +8,6 @@ const nextConfig = {
     // Disable TypeScript errors during builds
     ignoreBuildErrors: true,
   },
-}
+};
 
-module.exports = nextConfig
+module.exports = nextConfig;

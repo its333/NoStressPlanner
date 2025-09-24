@@ -50,7 +50,7 @@ class SessionManager {
     const acceptLanguage = req?.headers?.get('accept-language') || '';
     const acceptEncoding = req?.headers?.get('accept-encoding') || '';
     const browserFingerprint = `${userAgent}_${acceptLanguage}_${acceptEncoding}`;
-    
+
     // Create a unique cache key per browser/session with better isolation
     const cacheKey = `${cleanCookieHeader.substring(0, 50)}_${browserFingerprint.substring(0, 50)}_${ip}`;
 

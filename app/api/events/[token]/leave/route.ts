@@ -13,7 +13,10 @@ import { emit } from '@/lib/realtime';
 import { getSelectedPerson } from '@/lib/simple-cookies';
 
 export const DELETE = rateLimiters.general(
-  async (_req: NextRequest, context: { params: Promise<{ token: string }> }) => {
+  async (
+    _req: NextRequest,
+    context: { params: Promise<{ token: string }> }
+  ) => {
     try {
       const { token } = await context.params;
 
@@ -26,10 +29,10 @@ export const DELETE = rateLimiters.general(
               attendeeNames: true,
               attendeeSessions: {
                 where: { isActive: true },
-                include: { attendeeName: true }
-              }
-            }
-          }
+                include: { attendeeName: true },
+              },
+            },
+          },
         },
       });
 
@@ -43,7 +46,7 @@ export const DELETE = rateLimiters.general(
 
       // Find the attendee session for the current user
       let attendeeSession = null;
-      
+
       if (userId) {
         // Logged-in user: find their session
         attendeeSession = event.attendeeSessions.find(s => s.userId === userId);
@@ -51,9 +54,13 @@ export const DELETE = rateLimiters.general(
         // Anonymous user: find session by selected person
         const selectedPerson = await getSelectedPerson(event.id, req);
         if (selectedPerson) {
-          const selectedAttendeeName = event.attendeeNames.find(name => name.slug === selectedPerson);
+          const selectedAttendeeName = event.attendeeNames.find(
+            name => name.slug === selectedPerson
+          );
           if (selectedAttendeeName) {
-            attendeeSession = event.attendeeSessions.find(s => s.attendeeNameId === selectedAttendeeName.id);
+            attendeeSession = event.attendeeSessions.find(
+              s => s.attendeeNameId === selectedAttendeeName.id
+            );
           }
         }
       }
@@ -80,8 +87,8 @@ export const DELETE = rateLimiters.general(
 
       // Emit realtime event to update all clients
       try {
-        await emit(event.id, 'attendee.left', { 
-          attendeeId: attendeeSession.id 
+        await emit(event.id, 'attendee.left', {
+          attendeeId: attendeeSession.id,
         });
       } catch (emitError) {
         debugLog('Leave API: failed to emit attendee.left event', emitError);
@@ -99,11 +106,10 @@ export const DELETE = rateLimiters.general(
         attendeeNameId: attendeeSession.attendeeNameId,
       });
 
-      return NextResponse.json({ 
+      return NextResponse.json({
         success: true,
         message: 'Successfully left the event',
       });
-
     } catch (error) {
       debugLog('Leave API: error occurred', error);
       return NextResponse.json(

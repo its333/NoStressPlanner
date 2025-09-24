@@ -28,28 +28,38 @@ export function useDragAndDrop(
     currentDate: null,
   });
 
-  const onDragStart = useCallback((date: string, mode: 'add' | 'remove') => {
-    if (isDateDisabled(date)) return;
-    
-    setDragState({
-      isDragging: true,
-      startDate: date,
-      mode,
-      currentDate: date,
-    });
-  }, [isDateDisabled]);
+  const onDragStart = useCallback(
+    (date: string, mode: 'add' | 'remove') => {
+      if (isDateDisabled(date)) return;
 
-  const onDragEnter = useCallback((date: string) => {
-    if (!dragState.isDragging || isDateDisabled(date)) return;
-    
-    setDragState(prev => ({
-      ...prev,
-      currentDate: date,
-    }));
-  }, [dragState.isDragging, isDateDisabled]);
+      setDragState({
+        isDragging: true,
+        startDate: date,
+        mode,
+        currentDate: date,
+      });
+    },
+    [isDateDisabled]
+  );
+
+  const onDragEnter = useCallback(
+    (date: string) => {
+      if (!dragState.isDragging || isDateDisabled(date)) return;
+
+      setDragState(prev => ({
+        ...prev,
+        currentDate: date,
+      }));
+    },
+    [dragState.isDragging, isDateDisabled]
+  );
 
   const onDragEnd = useCallback(() => {
-    if (!dragState.isDragging || !dragState.startDate || !dragState.currentDate) {
+    if (
+      !dragState.isDragging ||
+      !dragState.startDate ||
+      !dragState.currentDate
+    ) {
       setDragState({
         isDragging: false,
         startDate: null,
@@ -78,7 +88,7 @@ export function useDragAndDrop(
       // Generate all dates in range
       const datesInRange: string[] = [];
       const current = new Date(rangeStart);
-      
+
       while (current <= rangeEnd) {
         const iso = current.toISOString().split('T')[0];
         if (!isDateDisabled(iso)) {
@@ -89,7 +99,7 @@ export function useDragAndDrop(
 
       // Apply changes based on mode
       const newSelected = new Set(selected);
-      
+
       if (dragState.mode === 'add') {
         datesInRange.forEach(date => newSelected.add(date));
       } else if (dragState.mode === 'remove') {
@@ -135,7 +145,11 @@ export function isDateInDragRange(date: string, dragState: DragState): boolean {
   return target >= rangeStart && target <= rangeEnd;
 }
 
-export function DragPreview({ dragState: _dragState }: { dragState: DragState }) {
+export function DragPreview({
+  dragState: _dragState,
+}: {
+  dragState: DragState;
+}) {
   // No overlay at all - completely removed
   return null;
 }

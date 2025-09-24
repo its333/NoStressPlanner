@@ -14,17 +14,16 @@ import { emit } from '@/lib/realtime';
 import { sessionManager } from '@/lib/session-manager';
 import { setSelectedPerson } from '@/lib/simple-cookies';
 
-const joinEventSchema = z.object({
-  attendeeNameId: z.string().optional(),
-  nameSlug: z.string().optional(),
-  displayName: z.string().optional(),
-  timeZone: z.string().optional(),
-}).refine(
-  (data) => data.attendeeNameId || data.nameSlug,
-  {
-    message: "Either attendeeNameId or nameSlug must be provided",
-  }
-);
+const joinEventSchema = z
+  .object({
+    attendeeNameId: z.string().optional(),
+    nameSlug: z.string().optional(),
+    displayName: z.string().optional(),
+    timeZone: z.string().optional(),
+  })
+  .refine(data => data.attendeeNameId || data.nameSlug, {
+    message: 'Either attendeeNameId or nameSlug must be provided',
+  });
 
 export const POST = rateLimiters.general(
   async (req: NextRequest, context: { params: Promise<{ token: string }> }) => {
@@ -47,21 +46,24 @@ export const POST = rateLimiters.general(
       // Get event with all necessary data
       const invite = await prisma.inviteToken.findUnique({
         where: { token },
-        include: { 
-          event: { 
-            include: { 
+        include: {
+          event: {
+            include: {
               attendeeNames: true,
               attendeeSessions: {
                 where: { isActive: true },
-                include: { attendeeName: true }
-              }
-            }
-          }
+                include: { attendeeName: true },
+              },
+            },
+          },
         },
       });
 
       if (!invite?.event) {
-        return NextResponse.json({ ok: false, error: 'Event not found' }, { status: 404 });
+        return NextResponse.json(
+          { ok: false, error: 'Event not found' },
+          { status: 404 }
+        );
       }
 
       const event = invite.event;
@@ -108,12 +110,14 @@ export const POST = rateLimiters.general(
 
       // For logged-in users, check if they already have a session
       if (userId) {
-        const existingSession = activeSessions.find(session => session.userId === userId);
+        const existingSession = activeSessions.find(
+          session => session.userId === userId
+        );
         if (existingSession) {
           // User already has a session, update it to use the new name
           await prisma.attendeeSession.update({
             where: { id: existingSession.id },
-            data: { 
+            data: {
               attendeeNameId: attendeeName.id,
               sessionKey: `person_${attendeeName.slug}_${Date.now()}`, // Temporary session key for compatibility
               displayName: displayName || attendeeName.label,
@@ -145,7 +149,10 @@ export const POST = rateLimiters.general(
               id: name.id,
               label: name.label,
               slug: name.slug,
-              takenBy: activeSessions.find(s => s.attendeeNameId === name.id)?.userId ? 'claimed' : null,
+              takenBy: activeSessions.find(s => s.attendeeNameId === name.id)
+                ?.userId
+                ? 'claimed'
+                : null,
             })),
             you: {
               id: existingSession.id,
@@ -184,18 +191,24 @@ export const POST = rateLimiters.general(
         userId: attendeeSession.userId,
       });
 
-      console.log('🍪 Join API: Session created', { 
+      console.log('🍪 Join API: Session created', {
         userId: attendeeSession.userId,
         isAnonymous: !attendeeSession.userId,
-        attendeeNameSlug: attendeeName.slug 
+        attendeeNameSlug: attendeeName.slug,
       });
 
       // For anonymous users, set their selected person for UX
       if (!userId) {
-        console.log('🍪 Setting cookie for anonymous user:', { userId, attendeeNameSlug: attendeeName.slug });
+        console.log('🍪 Setting cookie for anonymous user:', {
+          userId,
+          attendeeNameSlug: attendeeName.slug,
+        });
         await setSelectedPerson(event.id, attendeeName.slug, req);
       } else {
-        console.log('🍪 Skipping cookie for logged-in user:', { userId, attendeeNameSlug: attendeeName.slug });
+        console.log('🍪 Skipping cookie for logged-in user:', {
+          userId,
+          attendeeNameSlug: attendeeName.slug,
+        });
       }
 
       sessionManager.clearCache();
@@ -216,14 +229,18 @@ export const POST = rateLimiters.general(
         ok: true,
         attendeeId: attendeeSession.id,
         mode,
-        message: mode === 'switched'
-          ? `You've switched to "${attendeeName.label}".`
-          : `You're now joining as "${attendeeName.label}".`,
+        message:
+          mode === 'switched'
+            ? `You've switched to "${attendeeName.label}".`
+            : `You're now joining as "${attendeeName.label}".`,
         attendeeNames: event.attendeeNames.map(name => ({
           id: name.id,
           label: name.label,
           slug: name.slug,
-          takenBy: activeSessions.find(s => s.attendeeNameId === name.id)?.userId ? 'claimed' : null,
+          takenBy: activeSessions.find(s => s.attendeeNameId === name.id)
+            ?.userId
+            ? 'claimed'
+            : null,
         })),
         you: {
           id: attendeeSession.id,
@@ -239,7 +256,6 @@ export const POST = rateLimiters.general(
         initialBlocks: [],
         yourVote: null,
       });
-
     } catch (error) {
       debugLog('Join API: error occurred', error);
       return NextResponse.json(

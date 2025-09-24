@@ -50,8 +50,10 @@ export default function PickNameCard({
   useEffect(() => {
     if (!attendeeNames.find(name => name.slug === slug)) {
       const preferredSlug = data?.preferredName;
-      const preferredName = preferredSlug ? attendeeNames.find(name => name.slug === preferredSlug) : null;
-      
+      const preferredName = preferredSlug
+        ? attendeeNames.find(name => name.slug === preferredSlug)
+        : null;
+
       if (preferredName && !preferredName.takenBy) {
         setSlug(preferredName.slug);
         setDisplayName(preferredName.label);
@@ -65,7 +67,7 @@ export default function PickNameCard({
   async function join() {
     setLoading(true);
     setError(null);
-    
+
     try {
       const selectedName = attendeeNames.find(name => name.slug === slug);
       if (!selectedName) {

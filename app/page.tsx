@@ -7,6 +7,8 @@ import { getUserEvents, type UserEventSummary } from '@/lib/user-events';
 
 import MarketingPage from './(marketing)/page';
 
+export const dynamic = 'force-dynamic';
+
 export default async function HomePage() {
   // Get the actual session from NextAuth
   // This ensures proper authentication state detection

@@ -61,20 +61,32 @@ export const POST = rateLimiters.general(
       }
 
       // Get session information using the new session manager
-      const sessionInfo = await sessionManager.getSessionInfo(req);
+      let sessionInfo;
+      let hostDetection;
+      let isHost = false;
+      
+      try {
+        sessionInfo = await sessionManager.getSessionInfo(req);
+        
+        // Use the new host detection system
+        hostDetection = await sessionManager.detectHost(
+          invite.event.hostId,
+          invite.event.host?.name || '',
+          sessionInfo.userId,
+          undefined, // No attendee display name available in this context
+          req.headers
+            .get('cookie')
+            ?.match(/next-auth\.session-token=([^;]+)/)?.[1]
+        );
 
-      // Use the new host detection system
-      const hostDetection = await sessionManager.detectHost(
-        invite.event.hostId,
-        invite.event.host?.name || '',
-        sessionInfo.userId,
-        undefined, // No attendee display name available in this context
-        req.headers
-          .get('cookie')
-          ?.match(/next-auth\.session-token=([^;]+)/)?.[1]
-      );
-
-      const isHost = hostDetection.isHost;
+        isHost = hostDetection.isHost;
+      } catch (error) {
+        debugLog('Phase API: session/host detection error', error);
+        return NextResponse.json(
+          { error: 'Session detection failed', details: error instanceof Error ? error.message : 'Unknown error' },
+          { status: 500 }
+        );
+      }
 
       debugLog('Phase API: host detection summary', {
         sessionUserId: sessionInfo.userId,

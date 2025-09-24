@@ -241,15 +241,24 @@ export const GET = monitorApiRoute(
       // Find who has explicitly saved their availability
       // We now use the hasSavedAvailability field which is set to true when someone calls the blocks API
 
-      // Get attendees who have explicitly saved their availability (regardless of whether they have blocks)
-      const attendeesWhoHaveSavedAvailability = new Set(
-        (attendeeSessions || [])
-          .filter(
-            (session: any) => session.isActive && session.hasSavedAvailability
-          )
-          .map((session: any) => session.attendeeName?.id)
-          .filter(Boolean)
-      );
+      // Get attendees who have explicitly saved their availability
+      // In PICK_DAYS phase, anyone who voted "I'm in!" and has interacted with the calendar has set availability
+      // We can determine this by checking if they have any blocks OR if they have an active session
+      const attendeesWhoHaveSavedAvailability = new Set<string>();
+      
+      // Add attendees who have blocks (they've explicitly blocked days)
+      blocks.forEach((block: any) => {
+        if (block.attendeeNameId) {
+          attendeesWhoHaveSavedAvailability.add(block.attendeeNameId);
+        }
+      });
+      
+      // Add attendees who have active sessions (they've accessed the calendar)
+      attendeeSessions.forEach((session: any) => {
+        if (session.attendeeName?.id) {
+          attendeesWhoHaveSavedAvailability.add(session.attendeeName.id);
+        }
+      });
 
       Array.from(inIds).forEach(attendeeNameId => {
         const nameId = attendeeNameId as string;
@@ -347,12 +356,9 @@ export const GET = monitorApiRoute(
         })),
         availabilityProgress: {
           totalEligible: availabilityProgress.totalEligible,
-          completedAvailability:
-            availabilityProgress.completedAvailability.size,
-          notSetYet: availabilityProgress.notSetYet.size,
-          isComplete:
-            availabilityProgress.notSetYet.size === 0 &&
-            availabilityProgress.totalEligible > 0,
+          completedAvailability: availabilityProgress.completedAvailability,
+          notSetYet: availabilityProgress.notSetYet,
+          isComplete: availabilityProgress.isComplete,
         },
         votes: votes.map((v: any) => ({
           attendeeNameId: v.attendeeNameId,

@@ -4,7 +4,6 @@ import type { ReactNode } from 'react';
 import { Providers } from './providers';
 import AppHeader from '@/components/AppHeader';
 import { SessionMonitor } from '@/components/SessionMonitor';
-import { BrowserSessionManager } from '@/components/BrowserSessionManager';
 import { auth } from '@/lib/auth';
 
 export const metadata: Metadata = {
@@ -50,7 +49,6 @@ export default async function RootLayout({
       </head>
       <body className="bg-white text-slate-900">
         <Providers session={session}>
-          <BrowserSessionManager />
           <SessionMonitor />
           <AppHeader />
           <div className="min-h-screen">

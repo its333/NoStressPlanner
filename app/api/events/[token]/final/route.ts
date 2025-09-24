@@ -97,6 +97,15 @@ export const POST = rateLimiters.general(
     if (updated.phase === 'FINALIZED') {
       await emit(event.id, 'phase.changed', { phase: 'FINALIZED' });
     }
+
+    // Invalidate cache to ensure all clients get updated data
+    try {
+      const { invalidateEventOperationCache } = await import('@/lib/cache-invalidation');
+      await invalidateEventOperationCache(token, 'final');
+    } catch (cacheError) {
+      console.warn('Failed to invalidate cache:', cacheError);
+    }
+
     return NextResponse.json({ ok: true });
   }
 );

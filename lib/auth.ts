@@ -165,7 +165,7 @@ const TEST_BYPASS_ENABLED =
   process.env.NODE_ENV !== 'production' &&
   process.env.TEST_AUTH_BYPASS === 'true';
 
-export const auth: typeof baseAuth = async (...args) => {
+export const auth = async (...args: any[]) => {
   if (TEST_BYPASS_ENABLED) {
     console.warn(
       'TEST_AUTH_BYPASS enabled - returning mock session for testing purposes'
@@ -188,5 +188,11 @@ export const auth: typeof baseAuth = async (...args) => {
     return session;
   }
 
-  return baseAuth(...args);
+  if (args.length >= 2) {
+    return baseAuth(args[0], args[1]);
+  } else if (args.length === 1) {
+    return baseAuth(args[0]);
+  } else {
+    return baseAuth();
+  }
 };

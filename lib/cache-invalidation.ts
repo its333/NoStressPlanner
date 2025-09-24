@@ -1,9 +1,9 @@
 // lib/cache-invalidation.ts
 // Centralized cache invalidation system for consistent data management
 
-import { cacheManager } from './cache-manager';
-import { clearQueryCache } from './query-optimizations';
 import { logger } from './logger';
+import { eventCache, sessionCache, availabilityCache } from './intelligent-cache';
+import { clearQueryCache } from './query-optimizations';
 
 /**
  * Invalidate all caches related to a specific event
@@ -11,18 +11,30 @@ import { logger } from './logger';
  */
 export async function invalidateEventCache(token: string): Promise<void> {
   try {
+    logger.info('Starting event cache invalidation', { 
+      token: token.substring(0, 8) + '...' 
+    });
+    
     // 1. Clear query cache (database query results)
     clearQueryCache(token);
     
-    // 2. Clear all session-specific event data caches
-    const deletedCount = await cacheManager.deletePattern(`event_data:${token}`);
+    // 2. Clear all event data caches using IntelligentCache (including user-specific keys)
+    const eventDeletedCount = eventCache.deletePattern(`event_data:${token}`);
     
-    // 3. Clear any other event-related caches
-    await cacheManager.deletePattern(`event_query:${token}`);
+    // 3. Clear session caches
+    const sessionDeletedCount = sessionCache.deletePattern(`event_data:${token}`);
+    
+    // 4. Clear availability caches
+    const availabilityDeletedCount = availabilityCache.deletePattern(`event_data:${token}`);
+    
+    const totalDeletedCount = eventDeletedCount + sessionDeletedCount + availabilityDeletedCount;
     
     logger.info('Event cache invalidated', { 
       token: token.substring(0, 8) + '...', 
-      deletedCount 
+      eventDeletedCount,
+      sessionDeletedCount,
+      availabilityDeletedCount,
+      totalDeletedCount
     });
   } catch (error) {
     logger.error('Failed to invalidate event cache', { 
@@ -38,7 +50,7 @@ export async function invalidateEventCache(token: string): Promise<void> {
  */
 export async function invalidateUserCache(userId: string): Promise<void> {
   try {
-    const deletedCount = await cacheManager.deletePattern(`user:${userId}`);
+    const deletedCount = eventCache.deletePattern(`user:${userId}`);
     
     logger.info('User cache invalidated', { 
       userId: userId.substring(0, 8) + '...', 
@@ -59,14 +71,14 @@ export async function invalidateUserCache(userId: string): Promise<void> {
 export async function invalidateSessionCache(sessionKey?: string): Promise<void> {
   try {
     if (sessionKey) {
-      const deletedCount = await cacheManager.deletePattern(`session:${sessionKey}`);
+      const deletedCount = sessionCache.deletePattern(`session:${sessionKey}`);
       logger.info('Session cache invalidated', { 
         sessionKey: sessionKey.substring(0, 20) + '...', 
         deletedCount 
       });
     } else {
       // Clear all session caches
-      const deletedCount = await cacheManager.deletePattern('session:');
+      const deletedCount = sessionCache.deletePattern('session:');
       logger.info('All session caches invalidated', { deletedCount });
     }
   } catch (error) {
@@ -86,6 +98,11 @@ export async function invalidateEventOperationCache(
   operation: 'vote' | 'block' | 'join' | 'leave' | 'phase' | 'final' | 'switch-name'
 ): Promise<void> {
   try {
+    logger.info('Invalidating event operation cache', { 
+      token: token.substring(0, 8) + '...', 
+      operation 
+    });
+    
     // Always invalidate event cache
     await invalidateEventCache(token);
     
@@ -94,28 +111,28 @@ export async function invalidateEventOperationCache(
       case 'vote':
       case 'block':
         // These operations affect availability calculations
-        await cacheManager.deletePattern(`availability:${token}`);
+        availabilityCache.deletePattern(`availability:${token}`);
         break;
         
       case 'join':
       case 'leave':
         // These operations affect attendee lists
-        await cacheManager.deletePattern(`attendees:${token}`);
+        eventCache.deletePattern(`attendees:${token}`);
         break;
         
       case 'phase':
         // Phase changes affect the entire event state
-        await cacheManager.deletePattern(`event_state:${token}`);
+        eventCache.deletePattern(`event_state:${token}`);
         break;
         
       case 'final':
         // Final date affects all event data
-        await cacheManager.deletePattern(`event_final:${token}`);
+        eventCache.deletePattern(`event_final:${token}`);
         break;
         
       case 'switch-name':
         // Name changes affect session data
-        await cacheManager.deletePattern(`session_data:${token}`);
+        sessionCache.deletePattern(`session_data:${token}`);
         break;
     }
     
@@ -138,7 +155,10 @@ export async function invalidateEventOperationCache(
  */
 export async function emergencyCacheFlush(): Promise<void> {
   try {
-    await cacheManager.flush();
+    // Clear all caches
+    eventCache.clear();
+    sessionCache.clear();
+    availabilityCache.clear();
     clearQueryCache(); // Clear all query caches
     
     logger.warn('Emergency cache flush executed');

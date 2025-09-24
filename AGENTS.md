@@ -127,7 +127,9 @@ Auto-fail: If now > voteDeadline and inCount < quorum and phase is VOTE, set pha
 
 Host-only: Only host can change phase or pick final date (403 otherwise).
 
-Join gating: A viewer must claim a host-provided name (and be logged in if requireLoginToAttend) before voting/blocking days.
+Person-centric approach: Track people, not complex sessions. Anonymous users can freely switch between names. Logged-in users can claim and protect their person name.
+
+Join gating: A viewer must select a host-provided name (and be logged in if requireLoginToAttend) before voting/blocking days.
 
 Anonymity: Day blocks are anonymous by default; toggle per attendee allowed.
 

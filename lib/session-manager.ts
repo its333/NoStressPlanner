@@ -32,7 +32,7 @@ class SessionManager {
    * Get session information with comprehensive error handling and fallback mechanisms
    */
   async getSessionInfo(req?: NextRequest): Promise<SessionInfo> {
-    // Create a more specific cache key that includes user agent and IP
+    // Create a more specific cache key that excludes browser-session-id cookie
     const cookieHeader = req?.headers?.get('cookie') || '';
     const userAgent = req?.headers?.get('user-agent') || '';
     const ip =
@@ -40,8 +40,19 @@ class SessionManager {
       req?.headers?.get('x-real-ip') ||
       'unknown';
 
-    // Create a unique cache key per browser/session
-    const cacheKey = `${cookieHeader.substring(0, 50)}_${userAgent.substring(0, 20)}_${ip}`;
+    // Create a more unique cache key that includes more browser-specific data
+    const cleanCookieHeader = cookieHeader
+      .split(';')
+      .filter(cookie => !cookie.trim().startsWith('browser-session-id='))
+      .join(';');
+
+    // Include more browser-specific data for better isolation
+    const acceptLanguage = req?.headers?.get('accept-language') || '';
+    const acceptEncoding = req?.headers?.get('accept-encoding') || '';
+    const browserFingerprint = `${userAgent}_${acceptLanguage}_${acceptEncoding}`;
+    
+    // Create a unique cache key per browser/session with better isolation
+    const cacheKey = `${cleanCookieHeader.substring(0, 50)}_${browserFingerprint.substring(0, 50)}_${ip}`;
 
     // Check cache first (with proper isolation)
     const cached = this.sessionCache.get(cacheKey);

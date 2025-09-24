@@ -1,7 +1,7 @@
 // lib/cache-health.ts
 // Cache health monitoring and consistency validation system
 
-import { cacheManager } from './cache-manager';
+import { eventCache, sessionCache, availabilityCache } from './intelligent-cache';
 import { logger } from './logger';
 
 interface CacheHealthReport {
@@ -29,44 +29,44 @@ export async function checkCacheHealth(): Promise<CacheHealthReport> {
     const testKey = `health_check_${Date.now()}`;
     const testValue = { test: true, timestamp: Date.now() };
     
-    // Test SET operation
-    const setResult = await cacheManager.set(testKey, testValue, { ttl: 60 });
-    if (!setResult) {
-      issues.push('Cache SET operation failed');
+    // Test eventCache
+    eventCache.set(testKey, testValue, 60);
+    const eventGetResult = eventCache.get(testKey);
+    if (!eventGetResult || JSON.stringify(eventGetResult) !== JSON.stringify(testValue)) {
+      issues.push('EventCache GET operation failed or returned incorrect data');
     }
+    eventCache.delete(testKey);
     
-    // Test GET operation
-    const getResult = await cacheManager.get(testKey);
-    if (!getResult || JSON.stringify(getResult) !== JSON.stringify(testValue)) {
-      issues.push('Cache GET operation failed or returned incorrect data');
+    // Test sessionCache
+    sessionCache.set(testKey, testValue, 60);
+    const sessionGetResult = sessionCache.get(testKey);
+    if (!sessionGetResult || JSON.stringify(sessionGetResult) !== JSON.stringify(testValue)) {
+      issues.push('SessionCache GET operation failed or returned incorrect data');
     }
+    sessionCache.delete(testKey);
     
-    // Test DELETE operation
-    const deleteResult = await cacheManager.delete(testKey);
-    if (!deleteResult) {
-      issues.push('Cache DELETE operation failed');
+    // Test availabilityCache
+    availabilityCache.set(testKey, testValue, 60);
+    const availabilityGetResult = availabilityCache.get(testKey);
+    if (!availabilityGetResult || JSON.stringify(availabilityGetResult) !== JSON.stringify(testValue)) {
+      issues.push('AvailabilityCache GET operation failed or returned incorrect data');
     }
+    availabilityCache.delete(testKey);
     
-    // Test pattern deletion
-    const patternTestKey = `pattern_test_${Date.now()}`;
-    await cacheManager.set(patternTestKey, testValue, { ttl: 60 });
-    const patternDeleteCount = await cacheManager.deletePattern('pattern_test_');
-    if (patternDeleteCount === 0) {
-      issues.push('Cache pattern deletion failed');
-    }
+    // Get combined cache statistics
+    const eventStats = eventCache.getStats();
+    const sessionStats = sessionCache.getStats();
+    const availabilityStats = availabilityCache.getStats();
     
-    // Test EXISTS operation
-    const existsResult = await cacheManager.exists(testKey);
-    if (existsResult) {
-      issues.push('Cache EXISTS operation failed - key should not exist after deletion');
-    }
+    const totalHits = eventStats.hits + sessionStats.hits + availabilityStats.hits;
+    const totalMisses = eventStats.misses + sessionStats.misses + availabilityStats.misses;
+    const totalSets = eventStats.sets + sessionStats.sets + availabilityStats.sets;
+    const totalDeletes = eventStats.deletes + sessionStats.deletes + availabilityStats.deletes;
     
-    // Get cache statistics
-    const stats = cacheManager.getStats();
-    const totalOperations = stats.hits + stats.misses + stats.sets + stats.deletes;
-    const hitRate = totalOperations > 0 ? (stats.hits / totalOperations) * 100 : 0;
-    const missRate = totalOperations > 0 ? (stats.misses / totalOperations) * 100 : 0;
-    const errorRate = totalOperations > 0 ? (stats.errors / totalOperations) * 100 : 0;
+    const totalOperations = totalHits + totalMisses + totalSets + totalDeletes;
+    const hitRate = totalOperations > 0 ? (totalHits / totalOperations) * 100 : 0;
+    const missRate = totalOperations > 0 ? (totalMisses / totalOperations) * 100 : 0;
+    const errorRate = 0; // IntelligentCache doesn't track errors separately
     
     // Analyze performance metrics
     if (hitRate < 50) {
@@ -74,10 +74,7 @@ export async function checkCacheHealth(): Promise<CacheHealthReport> {
       recommendations.push('Consider increasing cache TTL or improving cache key strategy');
     }
     
-    if (errorRate > 5) {
-      issues.push(`High cache error rate: ${errorRate.toFixed(2)}%`);
-      recommendations.push('Investigate cache backend connectivity and configuration');
-    }
+    // IntelligentCache doesn't track errors, so skip error rate check
     
     if (missRate > 70) {
       issues.push(`High cache miss rate: ${missRate.toFixed(2)}%`);
@@ -88,7 +85,7 @@ export async function checkCacheHealth(): Promise<CacheHealthReport> {
     let status: 'healthy' | 'degraded' | 'unhealthy';
     if (issues.length === 0) {
       status = 'healthy';
-    } else if (issues.length <= 2 && errorRate < 10) {
+    } else if (issues.length <= 2) {
       status = 'degraded';
     } else {
       status = 'unhealthy';
@@ -98,7 +95,7 @@ export async function checkCacheHealth(): Promise<CacheHealthReport> {
       status,
       issuesCount: issues.length,
       hitRate: hitRate.toFixed(2),
-      errorRate: errorRate.toFixed(2)
+      missRate: missRate.toFixed(2)
     });
     
     return {
@@ -143,7 +140,7 @@ export async function validateEventCacheConsistency(token: string): Promise<bool
     
     // This is a simplified check - in a real implementation, you'd want to
     // compare the data across different session-specific keys
-    const exists = await cacheManager.exists(eventCachePattern + 'test');
+    const exists = eventCache.get(eventCachePattern + 'test') !== undefined;
     
     logger.debug('Event cache consistency check', {
       token: token.substring(0, 8) + '...',

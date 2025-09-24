@@ -140,10 +140,11 @@ Open [http://localhost:3001](http://localhost:3001) to view the application.
 6. **Final selection** → Host picks the final date
 
 ### Session Management
-- **Event-specific sessions** → Each event has isolated session management
+- **Person-centric approach** → Track people, not complex sessions
 - **Anonymous support** → Users can participate without logging in
-- **Cross-browser isolation** → Sessions are properly isolated between browsers
-- **Automatic cleanup** → Stale sessions are automatically cleared
+- **Simple cookie tracking** → Cookies only store selected person name for UX
+- **Clear cookies = pick name again** → No session contamination issues
+- **Logged-in ownership** → Logged-in users can claim and protect their person name
 
 ### Real-time Updates
 - **Live voting** → See votes update in real-time

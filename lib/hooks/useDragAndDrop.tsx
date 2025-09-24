@@ -96,7 +96,8 @@ export function useDragAndDrop(
         datesInRange.forEach(date => newSelected.delete(date));
       }
 
-      onChange(Array.from(newSelected));
+      const result = Array.from(newSelected);
+      onChange(result);
     }
 
     setDragState({

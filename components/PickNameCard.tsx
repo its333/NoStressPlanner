@@ -13,6 +13,7 @@ interface PickNameCardProps {
   attendeeNames: AttendeeNameStatus[];
   defaultTz: string;
   onJoined: (result: JoinSuccessResponse) => Promise<void> | void;
+  data?: any; // Event data to access preferredName
 }
 
 function getBrowserTimeZone(defaultTz: string) {
@@ -33,6 +34,7 @@ export default function PickNameCard({
   attendeeNames,
   defaultTz,
   onJoined,
+  data,
 }: PickNameCardProps) {
   const firstAvailable = useMemo(
     () => attendeeNames.find(name => !name.takenBy) ?? attendeeNames[0],
@@ -44,16 +46,26 @@ export default function PickNameCard({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Set default name from preferred name or first available
   useEffect(() => {
     if (!attendeeNames.find(name => name.slug === slug)) {
-      setSlug(firstAvailable?.slug ?? '');
-      setDisplayName(firstAvailable?.label ?? '');
+      const preferredSlug = data?.preferredName;
+      const preferredName = preferredSlug ? attendeeNames.find(name => name.slug === preferredSlug) : null;
+      
+      if (preferredName && !preferredName.takenBy) {
+        setSlug(preferredName.slug);
+        setDisplayName(preferredName.label);
+      } else if (firstAvailable) {
+        setSlug(firstAvailable.slug);
+        setDisplayName(firstAvailable.label);
+      }
     }
-  }, [attendeeNames, firstAvailable, slug]);
+  }, [attendeeNames, firstAvailable, slug, data?.preferredName]);
 
   async function join() {
     setLoading(true);
     setError(null);
+    
     try {
       const selectedName = attendeeNames.find(name => name.slug === slug);
       if (!selectedName) {

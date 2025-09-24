@@ -111,7 +111,7 @@ model AttendeeSession {
   eventId         String
   attendeeNameId  String
   userId          String?
-  sessionKey      String
+  sessionKey      String?      // Made optional for person-centric system
   displayName     String
   timeZone        String
   anonymousBlocks Boolean      @default(true)

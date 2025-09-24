@@ -4,8 +4,7 @@
 export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getCurrentAttendeeSession } from '@/lib/attendees';
-import { cookieManager } from '@/lib/cookie-manager';
+import { getSelectedPerson } from '@/lib/simple-cookies';
 import { debugLog } from '@/lib/debug';
 import { handleNextApiError } from '@/lib/error-handling';
 import { eventCache } from '@/lib/intelligent-cache';
@@ -24,38 +23,47 @@ export const GET = monitorApiRoute(
       const { token } = await context.params;
       debugLog('Event API: token resolved', { token });
 
-      // For debugging: allow session key to be passed as query parameter
-      const debugSessionKey = req.nextUrl.searchParams.get('sessionKey');
       const cacheBust = req.nextUrl.searchParams.get('t');
+      const forceRefresh = req.nextUrl.searchParams.get('force') === 'true';
 
       // INTELLIGENT CACHING: Use session-specific cache keys to prevent contamination
       // while still benefiting from caching for performance
 
       // Fetch session information and event data concurrently
-      const [sessionInfo, event] = await Promise.all([
-        sessionManager.getSessionInfo(req),
-        getEventDataUltraOptimized(token),
-      ]);
+      const sessionInfo = await sessionManager.getSessionInfo(req);
+      const event = await getEventDataUltraOptimized(token);
+      
       if (!event) {
         return NextResponse.json({ error: 'Event not found' }, { status: 404 });
       }
 
-      const currentSessionKey =
-        debugSessionKey || (await cookieManager.getSessionKey(event.id));
-
-      // Create session-specific cache key
-      const userAgent = req.headers.get('user-agent') || 'unknown';
-      const browserFingerprint = userAgent
-        .substring(0, 50)
-        .replace(/[^a-zA-Z0-9]/g, '');
-      const browserSpecificCacheKey = `event_data:${token}:${browserFingerprint}:${currentSessionKey?.substring(0, 20) || 'no-session'}`;
+      const selectedPerson = await getSelectedPerson(event.id, req);
+      
+      // Create browser-specific cache key using request headers for better isolation
+      const userAgent = req.headers.get('user-agent') || '';
+      const ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || '';
+      const browserFingerprint = `${userAgent.substring(0, 50)}_${ip}`.replace(/[^a-zA-Z0-9_]/g, '_');
+      
+      // Create user-specific cache key to prevent cross-user contamination
+      const userIdentifier = sessionInfo.userId || selectedPerson || `anon_${browserFingerprint}`;
+      const eventCacheKey = `event_data:${token}:${userIdentifier}`;
 
       // Check intelligent cache first (unless cache bust requested)
-      if (!cacheBust) {
-        const cached = await eventCache.get(browserSpecificCacheKey);
+      // Skip cache if cacheBust timestamp or force refresh is provided
+      if (!cacheBust && !forceRefresh) {
+        const cached = await eventCache.get(eventCacheKey);
         if (cached) {
+          debugLog('Event API: returning cached data', {
+            token: token.substring(0, 8) + '...',
+            cacheKey: eventCacheKey,
+          });
           return NextResponse.json(cached);
         }
+      } else {
+        debugLog('Event API: bypassing cache', {
+          token: token.substring(0, 8) + '...',
+          reason: cacheBust ? 'cacheBust timestamp' : 'force refresh',
+        });
       }
 
       const now = new Date();
@@ -118,58 +126,33 @@ export const GET = monitorApiRoute(
       }
 
       // Resolve the viewer session from the already-fetched attendee sessions
-      const sessionFromKey = currentSessionKey
-        ? attendeeSessions.find(
-            (session: any) => session.sessionKey === currentSessionKey
-          )
-        : null;
-      const sessionFromUser =
-        !sessionFromKey && sessionInfo.userId
-          ? attendeeSessions.find(
-              (session: any) => session.userId === sessionInfo.userId
-            )
-          : null;
-
-      let you = (sessionFromKey || sessionFromUser) ?? null;
-
-      if (!you && (currentSessionKey || sessionInfo.userId)) {
-        you = await getCurrentAttendeeSession(
-          event.id,
-          sessionInfo.userId || undefined,
-          currentSessionKey || undefined
-        );
-      }
-
-      if (you) {
-        attendeeSessionByNameId.set(you.attendeeName.id, you);
-        if (!attendeeSessions.find((session: any) => session.id === you?.id)) {
-          attendeeSessions.push(you as any);
+      // Simple person detection - no complex session management needed
+      let you = null;
+      
+      if (sessionInfo.userId) {
+        // Logged-in user: find their attendee session
+        you = attendeeSessions.find((session: any) => session.userId === sessionInfo.userId) || null;
+      } else if (selectedPerson) {
+        // Anonymous user: find the person they selected
+        const selectedAttendeeName = event.attendeeNames?.find(name => name.slug === selectedPerson);
+        if (selectedAttendeeName) {
+          you = attendeeSessions.find((session: any) => session.attendeeNameId === selectedAttendeeName.id) || null;
         }
       }
 
-      debugLog('Event API: session detection summary', {
+      debugLog('Event API: person detection summary', {
         eventId: event.id,
         sessionInfo: {
           userId: sessionInfo.userId,
-          hasSessionKey: !!currentSessionKey,
-          sessionKeyPreview: currentSessionKey
-            ? `${currentSessionKey.substring(0, 20)}...`
-            : null,
-          fallbackUsed: sessionInfo.fallbackUsed,
+          hasSelectedPerson: !!selectedPerson,
+          selectedPerson,
         },
-        detectionMethod: sessionFromKey
-          ? 'sessionKey'
-          : sessionFromUser
-            ? 'userId'
-            : you
-              ? 'fallback'
-              : 'none',
+        detectionMethod: sessionInfo.userId ? 'userId' : selectedPerson ? 'selectedPerson' : 'none',
         you: you
           ? {
               id: you.id,
               displayName: you.displayName,
               attendeeNameId: you.attendeeNameId,
-              isActive: you.isActive,
             }
           : null,
       });
@@ -180,7 +163,7 @@ export const GET = monitorApiRoute(
         event.host.name || '',
         sessionInfo.userId, // Use sessionInfo.userId instead of you?.user?.id
         you?.displayName,
-        currentSessionKey || undefined
+        undefined
       );
 
       const finalIsHost = hostDetection.isHost;
@@ -202,6 +185,8 @@ export const GET = monitorApiRoute(
       debugLog('Event API: vote detection summary', {
         hasYou: !!you,
         youAttendeeNameId: you?.attendeeNameId,
+        youDisplayName: you?.displayName,
+        youAttendeeNameLabel: you?.attendeeName?.label,
         totalVotes: event.votes.length,
         allVotes: event.votes.map((v: any) => ({
           attendeeNameId: v.attendeeNameId,
@@ -289,6 +274,9 @@ export const GET = monitorApiRoute(
         };
       });
 
+        // Get selected person for anonymous users (UX only)
+        const preferredName = !sessionInfo.userId ? selectedPerson : null;
+
       const responseData = {
         event: {
           id: event.id,
@@ -306,6 +294,7 @@ export const GET = monitorApiRoute(
           showResultsToEveryone: (event as any).showResultsToEveryone ?? false,
         },
         attendeeNames: nameAvailability,
+        preferredName, // UX convenience for anonymous users
         phaseSummary: {
           inCount: inCount,
           totalParticipants: totalParticipants, // All people with any progress
@@ -341,6 +330,10 @@ export const GET = monitorApiRoute(
             availabilityProgress.notSetYet.size === 0 &&
             availabilityProgress.totalEligible > 0,
         },
+        votes: votes.map((v: any) => ({
+          attendeeNameId: v.attendeeNameId,
+          in: v.in,
+        })),
         attendeeDetails: attendeeDetails,
         attendeeSessions: (attendeeSessions || []).map((session: any) => ({
           id: session.id,
@@ -364,7 +357,7 @@ export const GET = monitorApiRoute(
         you: you
           ? {
               id: you.id,
-              displayName: you.displayName,
+              displayName: you.attendeeName.label, // Use attendeeName.label for consistency
               timeZone: you.timeZone,
               anonymousBlocks: you.anonymousBlocks,
               attendeeName: {
@@ -376,13 +369,13 @@ export const GET = monitorApiRoute(
           : null,
         isHost: finalIsHost,
         initialBlocks: yourBlocks.map((date: any) =>
-          toUtcDate(date).toISOString()
+          toUtcDate(date).toISOString().split('T')[0]
         ),
         yourVote: yourVote ? yourVote.in : null,
       };
 
       // Cache the response with intelligent TTL
-      await eventCache.set(browserSpecificCacheKey, responseData, 120000);
+      await eventCache.set(eventCacheKey, responseData, 120000);
 
       return NextResponse.json(responseData);
     } catch (error) {

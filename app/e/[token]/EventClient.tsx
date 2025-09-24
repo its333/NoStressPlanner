@@ -30,6 +30,7 @@ interface ApiResponse {
     finalDate?: string;
     requireLoginToAttend: boolean;
     showResultsToEveryone: boolean;
+    quorum: number;
   };
   phaseSummary: {
     inCount: number;
@@ -51,7 +52,7 @@ interface ApiResponse {
     timeZone: string;
     attendeeName: { id: string; label: string; slug: string };
     anonymousBlocks: boolean;
-  };
+  } | null;
   initialBlocks: string[];
   yourVote?: boolean | null;
   isHost: boolean;
@@ -69,13 +70,87 @@ interface ApiResponse {
     hasSetAvailability: boolean;
     isLoggedIn: boolean;
   }>;
+  votes: Array<{
+    attendeeNameId: string;
+    in: boolean;
+  }>;
 }
 
 export default function EventPageClient({ token }: { token: string }) {
-  const { data, mutate, isLoading } = useSWR<ApiResponse>(
-    `/api/events/${token}`
-  );
   const { data: session } = useSession();
+  
+  // Generate user-specific cache key to match server-side cache key
+  // Use the standard API endpoint - the server handles user-specific caching internally
+  const cacheKey = `/api/events/${token}`;
+  
+  const { data, mutate: originalMutate, isLoading, error } = useSWR<ApiResponse>(
+    cacheKey,
+    {
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
+      refreshInterval: 0, // Disable automatic polling
+      dedupingInterval: 5000, // Enable deduplication to prevent excessive requests
+    }
+  );
+
+  // Simple debounce function to prevent excessive API calls
+  const debounce = (func: (...args: any[]) => void, delay: number) => {
+    let timeoutId: NodeJS.Timeout;
+    return (...args: any[]) => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => func(...args), delay);
+    };
+  };
+
+  // Debounced mutate to prevent excessive API calls
+  const mutate = useCallback(
+    debounce((...args: any[]) => originalMutate(...args), 100),
+    [originalMutate]
+  );
+
+  // Removed aggressive force refresh on mount to prevent rate limiting
+  // The SWR configuration will handle fresh data fetching
+  
+  // Polling fallback for phase changes (in case Pusher fails)
+  useEffect(() => {
+    if (!data?.event?.id) return;
+    
+    const pollForPhaseChanges = async () => {
+      // Only poll if we're in VOTE phase (waiting for quorum)
+      if (data?.event?.phase === 'VOTE') {
+        console.log('🔄 Polling for phase changes - checking for quorum');
+        debugLog('EventClient: polling for phase changes');
+        
+        try {
+          // Use fetch with cache bypass to get fresh data
+          const timestamp = Date.now();
+          const url = `/api/events/${token}?t=${timestamp}&force=true`;
+          const response = await fetch(url);
+          const freshData = await response.json();
+          
+          console.log('🔄 Polling data received:', {
+            phase: freshData?.event?.phase,
+            quorum: freshData?.event?.quorum,
+            votesCount: freshData?.votes?.length || 0,
+            inVotesCount: freshData?.votes?.filter((v: any) => v.in).length || 0,
+          });
+          
+          // Update SWR cache with fresh data
+          await mutate(freshData, { revalidate: false });
+        } catch (error) {
+          console.error('❌ Polling failed:', error);
+          // Fallback to regular mutate
+          mutate();
+        }
+      }
+    };
+    
+    // Poll every 10 seconds when in VOTE phase (reduced from 3s to prevent rate limiting)
+    const interval = setInterval(pollForPhaseChanges, 10000);
+    
+    return () => clearInterval(interval);
+  }, [data?.event?.phase, data?.event?.id, mutate]);
+  
   const [unavailableDates, setUnavailableDates] = useState<string[]>([]);
   const [availabilityError, setAvailabilityError] = useState<string | null>(
     null
@@ -107,7 +182,7 @@ export default function EventPageClient({ token }: { token: string }) {
       setAnonymous(joinResult.you?.anonymousBlocks ?? true);
 
       await mutate(
-        current => {
+        (current: any) => {
           if (!current) {
             return current;
           }
@@ -139,168 +214,112 @@ export default function EventPageClient({ token }: { token: string }) {
   const [showFinalDateConfirm, setShowFinalDateConfirm] = useState(false);
   const [showNameSwitchModal, setShowNameSwitchModal] = useState(false);
   const [nameSwitchError, setNameSwitchError] = useState<string | null>(null);
+  const [phaseChangeNotification, setPhaseChangeNotification] = useState<string | null>(null);
+  const [previousPhase, setPreviousPhase] = useState<string | null>(null);
 
-  const needsLogin = data?.event.requireLoginToAttend && !session?.user?.id;
+  const needsLogin = data?.event?.requireLoginToAttend && !session?.user?.id;
   const needsJoin = !data?.you && !needsLogin;
-
+  
   // EventClient state management
 
   useEffect(() => {
     if (data?.initialBlocks) setUnavailableDates(data.initialBlocks);
     if (data?.yourVote !== undefined) setCurrentVote(data.yourVote);
     if (data?.event?.showResultsToEveryone !== undefined)
-      setShowResultsToEveryone(data.event.showResultsToEveryone);
+      setShowResultsToEveryone(data?.event?.showResultsToEveryone);
 
-    // CRITICAL: Clear any stale session cookies from other events
-    // This prevents session contamination between different events
-    if (data?.event?.id) {
-      const clearStaleCookies = () => {
-        const currentEventId = data.event.id;
-        const eventPrefix = currentEventId.substring(0, 8);
-
-        // Check if we have a session cookie that doesn't match this event
-        const cookies = document.cookie.split(';');
-        let hasStaleCookie = false;
-
-        cookies.forEach(cookie => {
-          const [name, value] = cookie.trim().split('=');
-          if (
-            (name === 'attendee-session' || name === 'anonymous-session') &&
-            value
-          ) {
-            // Check if the session key matches the current event
-            if (!value.includes(`_${eventPrefix}_`)) {
-              debugLog('EventClient: found stale session cookie', {
-                name,
-                sessionKeyPreview: `${value.substring(0, 20)}...`,
-              });
-              hasStaleCookie = true;
-              // Clear the stale cookie with multiple strategies
-              // Strategy 1: Clear with no domain
-              document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
-              // Strategy 2: Clear with localhost domain
-              document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=localhost;`;
-              // Strategy 3: Clear with .localhost domain
-              document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=.localhost;`;
-              // Strategy 4: Set empty value with immediate expiration
-              document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; max-age=0;`;
-            }
-          }
-        });
-
-        if (hasStaleCookie) {
-          debugLog(
-            'EventClient: cleared stale session cookies, revalidating data'
-          );
-          void mutate();
-        }
-      };
-
-      clearStaleCookies();
+    // Debug: Log the current data to see what we're receiving
+    if (data?.event) {
+      console.log('🔍 EventClient: Current data received:', {
+        phase: data?.event?.phase,
+        quorum: data?.event?.quorum,
+        votesCount: data.votes?.length || 0,
+        inVotesCount: data.votes?.filter((v: any) => v.in).length || 0,
+        timestamp: new Date().toISOString()
+      });
     }
-  }, [
-    data?.initialBlocks,
-    data?.yourVote,
-    data?.event?.showResultsToEveryone,
-    data?.event?.id,
-    mutate,
-  ]);
+
+    // Detect phase changes
+    if (data?.event?.phase && previousPhase && previousPhase !== data.event.phase) {
+      if (previousPhase === 'VOTE' && data?.event?.phase === 'PICK_DAYS') {
+        console.log('🎉 Phase changed from VOTE to PICK_DAYS!');
+        setPhaseChangeNotification('🎉 Quorum reached! Moving to PICK_DAYS phase!');
+        setTimeout(() => setPhaseChangeNotification(null), 5000);
+      }
+    }
+    
+    // Update previous phase
+    if (data?.event?.phase) {
+      setPreviousPhase(data?.event?.phase);
+    }
+
+  }, [data, previousPhase, isLoading, error]);
 
   // Real-time updates with fallback system
   useEffect(() => {
     if (!data?.event?.id) {
-      console.warn('No event ID available for real-time updates');
       return;
     }
 
-    debugLog('EventClient: setting up real-time updates', {
-      eventId: data.event.id,
-    });
-
     // Check Pusher availability
     const hasPusherConfig = !!(PUSHER_KEY && PUSHER_CLUSTER);
-    debugLog('EventClient: pusher configuration check', {
-      eventId: data.event.id,
-      hasPusherConfig,
-      pusherKey: PUSHER_KEY ? `${PUSHER_KEY.substring(0, 8)}...` : 'missing',
-      pusherCluster: PUSHER_CLUSTER || 'missing',
-      envCheck: {
-        NEXT_PUBLIC_PUSHER_KEY: process.env.NEXT_PUBLIC_PUSHER_KEY
-          ? 'present'
-          : 'missing',
-        NEXT_PUBLIC_PUSHER_CLUSTER: process.env.NEXT_PUBLIC_PUSHER_CLUSTER
-          ? 'present'
-          : 'missing',
-      },
-    });
 
     let unsubscribe: (() => void) | null = null;
 
     if (hasPusherConfig) {
       // Use Pusher for real-time updates
-      debugLog('EventClient: initializing Pusher client');
-      const client = new Pusher(PUSHER_KEY, {
+      const client = new Pusher(PUSHER_KEY, { 
         cluster: PUSHER_CLUSTER,
         forceTLS: true,
         enabledTransports: ['ws', 'wss'],
       });
-
-      const channel = client.subscribe(`event-${data.event.id}`);
-
-      client.connection.bind('connected', () => {
-        debugLog('EventClient: pusher connected');
-      });
-
-      client.connection.bind('failed', (error: any) => {
-        console.error('❌ Pusher connection failed:', error);
-      });
-
-      client.connection.bind('disconnected', () => {
-        debugLog('EventClient: pusher disconnected');
-      });
-
-      client.connection.bind('error', (error: any) => {
-        console.error('🚨 Pusher error:', error);
-      });
-
+      
+      const channel = client.subscribe(`event-${data?.event?.id}`);
+      
       // Specific handlers for different event types
       const eventHandlers = {
-        'vote.updated': (_data: any) => {
-          debugLog('EventClient: vote updated event received');
+        'vote.updated': () => {
           mutate();
         },
-        'blocks.updated': (_data: any) => {
-          debugLog('EventClient: blocks updated event received');
+        'blocks.updated': () => {
           mutate();
         },
         'phase.changed': (data: any) => {
-          debugLog('EventClient: phase changed event received', {
-            phase: data?.phase,
-          });
+          console.log('🔄 Phase changed event received:', data);
+          mutate();
+          
+          // Show notifications for different phase transitions
+          if (data?.phase === 'PICK_DAYS' && data?.reason === 'quorum_met') {
+            setPhaseChangeNotification('🎉 Quorum reached! Moving to PICK_DAYS phase');
+            setTimeout(() => setPhaseChangeNotification(null), 5000);
+          } else if (data?.phase === 'RESULTS') {
+            setPhaseChangeNotification('📊 Moving to Results phase');
+            setTimeout(() => setPhaseChangeNotification(null), 5000);
+          } else if (data?.phase === 'FINALIZED') {
+            setPhaseChangeNotification('🎉 Event finalized!');
+            setTimeout(() => setPhaseChangeNotification(null), 5000);
+          } else if (data?.phase === 'FAILED') {
+            setPhaseChangeNotification('❌ Event failed - deadline passed without quorum');
+            setTimeout(() => setPhaseChangeNotification(null), 5000);
+          }
+        },
+        'final.date.set': () => {
           mutate();
         },
-        'final.date.set': (_data: any) => {
-          debugLog('EventClient: final date event received');
+        'attendee.nameChanged': () => {
           mutate();
         },
-        'attendee.nameChanged': (_data: any) => {
-          debugLog('EventClient: attendee name changed event received');
+        'attendee.joined': () => {
           mutate();
         },
-        'attendee.joined': (_data: any) => {
-          debugLog('EventClient: attendee joined event received');
+        'attendee.left': () => {
           mutate();
         },
-        'attendee.left': (_data: any) => {
-          debugLog('EventClient: attendee left event received');
-          mutate();
-        },
-        'showResults.changed': (_data: any) => {
-          debugLog('EventClient: show results changed event received');
+        'showResults.changed': () => {
           mutate();
         },
       };
-
+      
       const events = [
         'vote.updated',
         'blocks.updated',
@@ -315,68 +334,46 @@ export default function EventPageClient({ token }: { token: string }) {
       events.forEach(event => {
         const handler = eventHandlers[event as keyof typeof eventHandlers];
         channel.bind(event, handler);
-        debugLog('EventClient: bound to pusher event', { event });
       });
-
+      
       unsubscribe = () => {
-        debugLog('EventClient: cleaning up pusher connection');
         events.forEach(event => {
           const handler = eventHandlers[event as keyof typeof eventHandlers];
           channel.unbind(event, handler);
         });
-        client.unsubscribe(`event-${data.event.id}`);
+        client.unsubscribe(`event-${data?.event?.id}`);
         client.disconnect();
       };
     } else {
       // Use polling fallback
-      debugLog('EventClient: using polling fallback for realtime updates');
       let isActive = true;
-      let lastUpdateTime = 0;
-
+      
       const poll = async () => {
         if (!isActive) return;
-
+        
         try {
-          const response = await fetch(
-            `/api/events/${token}?refresh=${Date.now()}`,
-            {
-              method: 'GET',
-              headers: {
-                'Cache-Control': 'no-cache',
-                Pragma: 'no-cache',
-              },
-            }
-          );
-
+          const response = await fetch(`/api/events/${token}?refresh=${Date.now()}`);
           if (response.ok) {
-            const currentTime = Date.now();
-            // Simple change detection - refresh if enough time has passed
-            if (currentTime - lastUpdateTime > 3000) {
-              // 3 seconds
-              debugLog('EventClient: polling detected potential update');
-              mutate();
-              lastUpdateTime = currentTime;
-            }
+            mutate();
           }
         } catch (error) {
           console.error('Polling error:', error);
         }
-
+        
         if (isActive) {
-          setTimeout(poll, 2000); // Poll every 2 seconds
+          setTimeout(poll, 5000); // Poll every 5 seconds
         }
       };
-
+      
       poll();
-
+      
       unsubscribe = () => {
         isActive = false;
-        debugLog('EventClient: stopped polling fallback');
       };
     }
 
     return unsubscribe;
-  }, [data?.event?.id, token, mutate]);
+  }, [data?.event?.id, token, mutate, isLoading, error]);
 
   useEffect(() => {
     if (copyStatus === 'idle') return;
@@ -397,52 +394,52 @@ export default function EventPageClient({ token }: { token: string }) {
 
   const switchName = useCallback(
     async (newNameId: string) => {
-      if (!data?.event?.id) return;
-
-      try {
-        setNameSwitchError(null);
-        // Switch to the new name (preserving all progress)
-        const response = await fetch(`/api/events/${token}/switch-name`, {
+    if (!data?.event?.id) return;
+    
+    try {
+      setNameSwitchError(null);
+      // Switch to the new name (preserving all progress)
+      const response = await fetch(`/api/events/${token}/switch-name`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ newNameId }),
-        });
-
-        if (!response.ok) {
+        body: JSON.stringify({ newNameId }),
+      });
+      
+      if (!response.ok) {
           const errorData = await response
             .json()
             .catch(() => ({ error: 'Unknown error' }));
-          const errorMessage = errorData.error || `HTTP ${response.status}`;
-          setNameSwitchError(errorMessage);
-          return; // Don't throw, just set error state
-        }
-
-        // Close modal and refresh data
-        setShowNameSwitchModal(false);
+        const errorMessage = errorData.error || `HTTP ${response.status}`;
+        setNameSwitchError(errorMessage);
+        return; // Don't throw, just set error state
+      }
+      
+      // Close modal and refresh data
+      setShowNameSwitchModal(false);
         debugLog('EventClient: before mutate (name switch)', {
-          unavailableDates,
-          currentVote,
+        unavailableDates,
+        currentVote,
           currentAttendeeName: data?.you?.attendeeName?.label,
-        });
-
-        // Refresh data from server and wait for it to complete
-        await mutate();
-
+      });
+      
+      // Refresh data from server and wait for it to complete
+      await mutate();
+      
         debugLog('EventClient: mutate resolved after name switch');
-
-        // Show success message if provided
-        const responseData = await response.json();
-        if (responseData.message) {
+      
+      // Show success message if provided
+      const responseData = await response.json();
+      if (responseData.message) {
           debugLog('EventClient: name switch success message', {
             message: responseData.message,
           });
-        }
-      } catch (error) {
-        console.error('Error switching name:', error);
+      }
+    } catch (error) {
+      console.error('Error switching name:', error);
         setNameSwitchError(
           error instanceof Error ? error.message : 'Failed to switch name'
         );
-      }
+    }
     },
     [data?.event?.id, token, mutate]
   );
@@ -455,18 +452,18 @@ export default function EventPageClient({ token }: { token: string }) {
     ) {
       return;
     }
-
+    
     setDeletingEvent(true);
     try {
       const res = await fetch(`/api/events/${token}/delete`, {
         method: 'DELETE',
       });
-
+      
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data?.error ?? 'Failed to delete event');
       }
-
+      
       window.location.href = '/';
     } catch (err) {
       setHostActionError(
@@ -482,22 +479,22 @@ export default function EventPageClient({ token }: { token: string }) {
       debugLog('EventClient: submitting vote', { inValue, currentVote, token });
       setVotingStatus('voting');
       setVoteError(null);
-
+      
       const previousVote = currentVote;
       setCurrentVote(inValue);
-
+      
       try {
         const res = await fetch(`/api/events/${token}/vote`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ in: inValue }),
         });
-
+        
         debugLog('EventClient: vote response received', {
           status: res.status,
           ok: res.ok,
         });
-
+        
         if (!res.ok) {
           const detail = await res.json().catch(() => ({}));
           setCurrentVote(previousVote);
@@ -507,14 +504,39 @@ export default function EventPageClient({ token }: { token: string }) {
             detail?.error ?? 'Failed to submit vote'
           );
           setVoteError(detail?.error ?? 'Failed to submit vote');
-          // Revalidate to get the correct data from server
-          await mutate();
+          
+          // If it's a phase error, force a complete cache bypass
+          if (detail?.error?.includes('VOTE phase')) {
+            console.log('🔄 Phase error detected, forcing cache bypass');
+            await mutate(undefined, { revalidate: true });
+          } else {
+            // Revalidate to get the correct data from server
+            await mutate();
+          }
           setTimeout(() => setVotingStatus('idle'), 3000);
           return;
         }
-
+        
+        const responseData = await res.json();
         setVotingStatus('success');
-        debugLog('EventClient: vote successful, revalidating');
+        
+        // Check if phase was advanced
+        if (responseData.phaseAdvanced) {
+          console.log('🎉 Phase advanced! Quorum reached!');
+          setPhaseChangeNotification('🎉 Quorum reached! Moving to next phase!');
+          setTimeout(() => setPhaseChangeNotification(null), 5000);
+          
+          // Force immediate fresh data fetch to show updated phase
+          console.log('🔄 Forcing fresh data fetch after phase advancement');
+          await mutate();
+        }
+        
+        debugLog('EventClient: vote successful, revalidating', {
+          phaseAdvanced: responseData.phaseAdvanced,
+          inCount: responseData.inCount,
+          quorum: responseData.quorum,
+        });
+        
         // Revalidate to get the actual data from server
         await mutate();
         setTimeout(() => setVotingStatus('idle'), 2000);
@@ -542,19 +564,50 @@ export default function EventPageClient({ token }: { token: string }) {
         dates: unavailableDates,
         anonymous,
       });
+      
       const response = await fetch(`/api/events/${token}/blocks`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        },
         body: JSON.stringify({ dates: unavailableDates, anonymous }),
       });
       if (!response.ok) {
         const errorData = await response
           .json()
           .catch(() => ({ error: 'Unknown error' }));
-        throw new Error(errorData.error || `HTTP ${response.status}`);
+        
+        console.error('❌ Availability API error:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorData,
+        });
+        
+        // Handle different error formats
+        let errorMessage = 'Unknown error';
+        if (errorData.error) {
+          errorMessage = typeof errorData.error === 'string' 
+            ? errorData.error 
+            : JSON.stringify(errorData.error);
+        } else if (errorData.fieldErrors) {
+          // Handle Zod validation errors
+          const fieldErrors = Object.entries(errorData.fieldErrors)
+            .map(([field, errors]) => `${field}: ${Array.isArray(errors) ? errors.join(', ') : errors}`)
+            .join('; ');
+          errorMessage = `Validation errors: ${fieldErrors}`;
+        } else if (errorData.formErrors && errorData.formErrors.length > 0) {
+          errorMessage = `Form errors: ${errorData.formErrors.join(', ')}`;
+        }
+        
+        throw new Error(errorMessage || `HTTP ${response.status}`);
       }
       // Revalidate to get the actual data from server
-      await mutate();
+      // Small delay to ensure cache invalidation has completed
+      setTimeout(async () => {
+        await mutate();
+      }, 100);
     } catch (error) {
       console.error('Availability submission failed:', error);
       setAvailabilityError(
@@ -606,7 +659,7 @@ export default function EventPageClient({ token }: { token: string }) {
         // Handle validation errors properly
         const errorMessage =
           typeof detail?.error === 'string'
-            ? detail.error
+          ? detail.error 
             : detail?.error?.message || 'Failed to update phase';
         setHostActionError(errorMessage);
         return;
@@ -618,33 +671,33 @@ export default function EventPageClient({ token }: { token: string }) {
 
   const updateFinalDate = useCallback(
     async (date: string | 'clear') => {
-      if (!data?.event?.id) return;
-
+    if (!data?.event?.id) return;
+    
       setFinalDateStatus('setting');
-      setHostActionError(null);
-
-      try {
-        const response = await fetch(`/api/events/${token}/final`, {
+    setHostActionError(null);
+    
+    try {
+    const response = await fetch(`/api/events/${token}/final`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ finalDate: date === 'clear' ? null : date }),
-        });
-
-        if (!response.ok) {
+    });
+      
+    if (!response.ok) {
           const errorData = await response
             .json()
             .catch(() => ({ error: 'Unknown error' }));
-          throw new Error(errorData.error || `HTTP ${response.status}`);
-        }
-
+      throw new Error(errorData.error || `HTTP ${response.status}`);
+    }
+      
         setFinalDateStatus('success');
-        setShowFinalDateConfirm(false);
+      setShowFinalDateConfirm(false);
         setFinalDraft('clear');
-        await mutate();
-
-        // Reset success status after 3 seconds
+    await mutate();
+      
+      // Reset success status after 3 seconds
         setTimeout(() => setFinalDateStatus('idle'), 3000);
-      } catch (error) {
+    } catch (error) {
         setFinalDateStatus('idle');
         setHostActionError(
           error instanceof Error ? error.message : 'Failed to set final date'
@@ -656,57 +709,79 @@ export default function EventPageClient({ token }: { token: string }) {
 
   const updateShowResultsToggle = useCallback(
     async (newValue: boolean) => {
-      if (!data?.isHost) return;
-
-      setUpdatingToggle(true);
-      try {
-        const response = await fetch(`/api/events/${token}/show-results`, {
+    if (!data?.isHost) return;
+    
+    setUpdatingToggle(true);
+    try {
+      const response = await fetch(`/api/events/${token}/show-results`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ showResultsToEveryone: newValue }),
-        });
-
-        if (!response.ok) {
+        body: JSON.stringify({ showResultsToEveryone: newValue }),
+      });
+      
+      if (!response.ok) {
           const errorData = await response
             .json()
             .catch(() => ({ error: 'Unknown error' }));
-          throw new Error(errorData.error || `HTTP ${response.status}`);
-        }
-
-        setShowResultsToEveryone(newValue);
-        await mutate();
-      } catch (error) {
-        console.error('Failed to update toggle:', error);
+        const errorMessage = typeof errorData.error === 'string' 
+          ? errorData.error 
+          : JSON.stringify(errorData.error);
+        throw new Error(errorMessage || `HTTP ${response.status}`);
+      }
+      
+      setShowResultsToEveryone(newValue);
+      await mutate();
+    } catch (error) {
+      console.error('Failed to update toggle:', error);
         setHostActionError(
           error instanceof Error ? error.message : 'Failed to update toggle'
         );
-      } finally {
-        setUpdatingToggle(false);
-      }
+    } finally {
+      setUpdatingToggle(false);
+    }
     },
     [data?.isHost, token, mutate]
   );
 
   const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const voteDeadline = data?.phaseSummary.voteDeadline
+  const voteDeadline = data?.phaseSummary?.voteDeadline
     ? new Date(data.phaseSummary.voteDeadline)
     : null;
   const voteClosed = voteDeadline ? isAfter(new Date(), voteDeadline) : false;
-  const canVote =
-    data?.event.phase === 'VOTE' || data?.event.phase === 'PICK_DAYS';
-  const topDates = data?.phaseSummary.topDates ?? [];
+  const canVote = data?.event?.phase === 'VOTE' || data?.event?.phase === 'PICK_DAYS';
+  const topDates = data?.phaseSummary?.topDates ?? [];
+
+  // Force refresh if there's a phase mismatch (client shows VOTE but server says otherwise)
+  useEffect(() => {
+    if (data?.event?.phase === 'VOTE' && voteError?.includes('VOTE phase')) {
+      console.log('🔄 Detected phase mismatch, forcing refresh');
+      mutate(undefined, { revalidate: true });
+    }
+  }, [data?.event?.phase, voteError, mutate]);
 
   return (
     <main className='container-page grid gap-6'>
       {isLoading && <p className='text-sm text-slate-500'>Loading event...</p>}
 
-      {data && <PhaseBar phase={data.event.phase} />}
+      {data && <PhaseBar phase={data?.event?.phase} />}
+      
+      {/* Phase Change Notification */}
+      {phaseChangeNotification && (
+        <div className="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-pulse">
+          {phaseChangeNotification}
+        </div>
+      )}
+      
+      {/* Manual refresh button for testing */}
+      <div className="flex justify-end">
+          {/* Manual refresh button removed - automatic updates should work */}
+      </div>
 
       {/* FINALIZED Phase Celebration - MOVED TO TOP */}
       {!isLoading &&
         data &&
-        data.event.phase === 'FINALIZED' &&
-        data.event.finalDate && (
+        data?.event?.phase === 'FINALIZED' &&
+        data?.event?.finalDate && (
           <section className='card bg-gradient-to-br from-green-50 via-blue-50 to-purple-50 border-2 border-green-200 shadow-lg'>
             <div className='text-center py-8'>
               <div className='text-6xl mb-6'>🎉</div>
@@ -720,7 +795,7 @@ export default function EventPageClient({ token }: { token: string }) {
 
               <div className='bg-white rounded-2xl p-8 border-2 border-green-200 shadow-lg max-w-md mx-auto'>
                 <div className='text-2xl font-bold text-slate-900 mb-2'>
-                  {format(new Date(data.event.finalDate), 'EEEE, MMMM d, yyyy')}
+                  {format(new Date(data?.event?.finalDate), 'EEEE, MMMM d, yyyy')}
                 </div>
                 <div className='text-lg text-slate-600 mb-4'>
                   Final Event Date
@@ -759,7 +834,7 @@ export default function EventPageClient({ token }: { token: string }) {
             <div className='flex flex-col gap-2'>
               <div className='flex flex-wrap items-center gap-3'>
                 <h1 className='text-2xl font-semibold text-slate-900'>
-                  {data.event.title}
+                  {data?.event?.title}
                 </h1>
               </div>
               {hostActionError && (
@@ -769,7 +844,7 @@ export default function EventPageClient({ token }: { token: string }) {
                     <span className='text-sm text-red-800'>
                       {hostActionError}
                     </span>
-                    <button
+                    <button 
                       onClick={() => setHostActionError(null)}
                       className='ml-auto text-red-600 hover:text-red-800'
                     >
@@ -798,17 +873,17 @@ export default function EventPageClient({ token }: { token: string }) {
               )}
             </div>
           </div>
-
-          {data.event.description && (
+          
+          {data?.event?.description && (
             <p className='prose-muted'>{data.event.description}</p>
           )}
           {data.you && !needsJoin && (
             <div className='flex items-center gap-2 text-sm text-slate-600'>
               <span>
-                Joined as: <strong>{data.you.displayName}</strong> (
-                {data.you.attendeeName.label})
+                Joined as: <strong>{data?.you?.displayName}</strong> (
+                {data?.you?.attendeeName?.label})
               </span>
-              <button
+              <button 
                 type='button'
                 className='text-xs text-brand-600 hover:text-brand-700 underline'
                 onClick={() => setShowNameSwitchModal(true)}
@@ -817,21 +892,21 @@ export default function EventPageClient({ token }: { token: string }) {
               </button>
             </div>
           )}
-
+          
           <div className='flex flex-wrap items-center justify-between gap-3'>
             <div className='text-right text-xs text-slate-500'>
               <p>
-                Quorum {data.phaseSummary.inCount} / {data.phaseSummary.quorum}
+                Quorum {data?.phaseSummary?.inCount} / {data?.phaseSummary?.quorum}
               </p>
               <p>
                 Deadline{' '}
-                {data.phaseSummary.voteDeadline
-                  ? format(new Date(data.phaseSummary.voteDeadline), 'PPpp')
+                {data?.phaseSummary?.voteDeadline
+                  ? format(new Date(data?.phaseSummary?.voteDeadline), 'PPpp')
                   : 'No deadline'}
               </p>
             </div>
           </div>
-          {data.event.finalDate && (
+          {data?.event?.finalDate && (
             <div className='flex items-center gap-2'>
               <span className='text-2xl'>🎉</span>
               <div className='flex flex-col'>
@@ -840,7 +915,7 @@ export default function EventPageClient({ token }: { token: string }) {
                 </span>
                 <span className='text-xs text-green-600'>
                   Final date:{' '}
-                  {format(new Date(data.event.finalDate), 'EEEE, MMMM d, yyyy')}
+                  {format(new Date(data?.event?.finalDate), 'EEEE, MMMM d, yyyy')}
                 </span>
               </div>
             </div>
@@ -858,6 +933,7 @@ export default function EventPageClient({ token }: { token: string }) {
           attendeeNames={data.attendeeNames ?? []}
           defaultTz={browserTz}
           onJoined={handleJoinSuccess}
+          data={data}
         />
       )}
 
@@ -865,10 +941,10 @@ export default function EventPageClient({ token }: { token: string }) {
       {!isLoading &&
         data &&
         !needsJoin &&
-        (data.event.phase === 'PICK_DAYS' ||
-          data.event.phase === 'RESULTS') && (
+        (data?.event?.phase === 'PICK_DAYS' ||
+          data?.event?.phase === 'RESULTS') && (
           <section
-            className={`card ${currentVote !== true && data.event.phase === 'PICK_DAYS' ? 'border-yellow-300 bg-yellow-50' : ''}`}
+            className={`card ${currentVote !== true && data?.event?.phase === 'PICK_DAYS' ? 'border-yellow-300 bg-yellow-50' : ''}`}
           >
             <div className='flex items-center justify-between gap-3'>
               <div className='flex items-center gap-2'>
@@ -889,42 +965,42 @@ export default function EventPageClient({ token }: { token: string }) {
                     : currentVote === false
                       ? 'Not this time'
                       : 'Not voted'}
-                </span>
-                {votingStatus === 'voting' && (
+              </span>
+              {votingStatus === 'voting' && (
                   <span className='text-xs text-blue-600'>Updating...</span>
-                )}
-                {votingStatus === 'success' && (
+              )}
+              {votingStatus === 'success' && (
                   <span className='text-xs text-green-600'>✓ Updated</span>
                 )}
-                {currentVote !== true && data.event.phase === 'PICK_DAYS' && (
+                {currentVote !== true && data?.event?.phase === 'PICK_DAYS' && (
                   <span className='text-xs text-yellow-700 font-medium'>
-                    ⚠️ Vote "I'm in!" to block days
+                    ⚠️ Vote &quot;I&apos;m in!&quot; to block days
                   </span>
-                )}
-              </div>
-              <div className='flex gap-2'>
-                <button
-                  className={`btn text-xs py-1 px-3 ${currentVote === false ? 'bg-slate-200 border-slate-400' : ''} ${votingStatus === 'voting' ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  onClick={() => submitVote(false)}
-                  disabled={!canVote || votingStatus === 'voting'}
-                  aria-label='Vote not attending'
-                  aria-pressed={currentVote === false}
-                >
-                  {votingStatus === 'voting' ? '...' : 'Not in'}
-                </button>
-                <button
-                  className={`btn-primary text-xs py-1 px-3 ${currentVote === true ? 'bg-green-600 hover:bg-green-700' : ''} ${votingStatus === 'voting' ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  onClick={() => submitVote(true)}
-                  disabled={!canVote || votingStatus === 'voting'}
-                  aria-label='Vote attending'
-                  aria-pressed={currentVote === true}
-                >
-                  {votingStatus === 'voting' ? '...' : "I'm in"}
-                </button>
-              </div>
+              )}
             </div>
-          </section>
-        )}
+              <div className='flex gap-2'>
+              <button 
+                className={`btn text-xs py-1 px-3 ${currentVote === false ? 'bg-slate-200 border-slate-400' : ''} ${votingStatus === 'voting' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                onClick={() => submitVote(false)}
+                disabled={!canVote || votingStatus === 'voting'}
+                  aria-label='Vote not attending'
+                aria-pressed={currentVote === false}
+              >
+                {votingStatus === 'voting' ? '...' : 'Not in'}
+              </button>
+              <button 
+                className={`btn-primary text-xs py-1 px-3 ${currentVote === true ? 'bg-green-600 hover:bg-green-700' : ''} ${votingStatus === 'voting' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                onClick={() => submitVote(true)}
+                disabled={!canVote || votingStatus === 'voting'}
+                  aria-label='Vote attending'
+                aria-pressed={currentVote === true}
+              >
+                  {votingStatus === 'voting' ? '...' : "I'm in"}
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Error display for vote errors */}
       {voteError && (
@@ -932,7 +1008,7 @@ export default function EventPageClient({ token }: { token: string }) {
           <div className='flex items-center gap-2'>
             <span className='text-red-600'>⚠️</span>
             <span className='text-sm text-red-800'>{voteError}</span>
-            <button
+            <button 
               onClick={() => setVoteError(null)}
               className='ml-auto text-red-600 hover:text-red-800'
             >
@@ -972,9 +1048,9 @@ export default function EventPageClient({ token }: { token: string }) {
               </span>
             )}
           </div>
-
+          
           <div className='flex flex-col sm:flex-row gap-3'>
-            <button
+            <button 
               className={`btn flex-1 py-3 ${currentVote === false ? 'bg-slate-200 border-2 border-slate-600 ring-2 ring-slate-200' : 'border-slate-300'} ${votingStatus === 'voting' ? 'opacity-50 cursor-not-allowed' : ''}`}
               onClick={() => submitVote(false)}
               disabled={!canVote || votingStatus === 'voting'}
@@ -984,7 +1060,7 @@ export default function EventPageClient({ token }: { token: string }) {
                 {votingStatus === 'voting' ? 'Updating...' : 'Not this time'}
               </span>
             </button>
-            <button
+            <button 
               className={`btn-primary flex-1 py-3 ${currentVote === true ? 'bg-green-600 hover:bg-green-700 border-2 border-green-800 ring-2 ring-green-200' : 'border-green-500'} ${votingStatus === 'voting' ? 'opacity-50 cursor-not-allowed' : ''}`}
               onClick={() => submitVote(true)}
               disabled={!canVote || votingStatus === 'voting'}
@@ -995,7 +1071,7 @@ export default function EventPageClient({ token }: { token: string }) {
               </span>
             </button>
           </div>
-
+          
           {votingStatus === 'success' && (
             <div className='bg-green-50 border border-green-200 rounded-lg p-3 text-center'>
               <span className='text-sm text-green-800'>
@@ -1003,7 +1079,7 @@ export default function EventPageClient({ token }: { token: string }) {
               </span>
             </div>
           )}
-
+          
           {voteClosed && (
             <p className='text-sm text-slate-500 text-center'>
               Voting is closed. The deadline was {format(voteDeadline!, 'PPpp')}
@@ -1013,7 +1089,7 @@ export default function EventPageClient({ token }: { token: string }) {
         </section>
       )}
 
-      {!isLoading && data && !needsJoin && data.event.phase === 'PICK_DAYS' && (
+      {!isLoading && data && !needsJoin && data?.event?.phase === 'PICK_DAYS' && (
         <section className='card grid gap-6'>
           <div className='flex flex-wrap items-center justify-between gap-4'>
             <div className='flex items-center gap-3'>
@@ -1031,10 +1107,10 @@ export default function EventPageClient({ token }: { token: string }) {
             </div>
             <div className='flex items-center gap-3'>
               <label className='flex items-center gap-2 text-sm text-slate-600 cursor-pointer'>
-                <input
+                <input 
                   type='checkbox'
                   className='w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500'
-                  checked={anonymous}
+                  checked={anonymous} 
                   onChange={event => setAnonymous(event.target.checked)}
                   disabled={currentVote !== true}
                 />
@@ -1042,7 +1118,7 @@ export default function EventPageClient({ token }: { token: string }) {
               </label>
             </div>
           </div>
-
+          
           {/* Check if user has voted IN */}
           {currentVote !== true ? (
             <div className='bg-yellow-50 border border-yellow-200 rounded-lg p-6'>
@@ -1054,7 +1130,7 @@ export default function EventPageClient({ token }: { token: string }) {
                   Vote Required to Set Availability
                 </h3>
                 <p className='text-yellow-700 mb-4'>
-                  You need to vote "I'm in!" above before you can mark
+                  You need to vote &quot;I&apos;m in!&quot; above before you can mark
                   unavailable days.
                 </p>
                 <p className='text-sm text-yellow-600'>
@@ -1073,7 +1149,7 @@ export default function EventPageClient({ token }: { token: string }) {
                   onChange={setUnavailableDates}
                 />
               </div>
-
+              
               {availabilityError && (
                 <div className='p-3 bg-red-50 border border-red-200 rounded-lg'>
                   <div className='flex items-center gap-2'>
@@ -1084,7 +1160,7 @@ export default function EventPageClient({ token }: { token: string }) {
                   </div>
                 </div>
               )}
-
+              
               <div className='flex justify-between items-center'>
                 <div className='text-sm text-slate-600'>
                   {unavailableDates.length > 0 ? (
@@ -1099,9 +1175,9 @@ export default function EventPageClient({ token }: { token: string }) {
                     </span>
                   )}
                 </div>
-                <button
+                <button 
                   className='btn-primary flex items-center gap-2'
-                  onClick={saveAvailability}
+                  onClick={saveAvailability} 
                   disabled={savingAvailability}
                 >
                   {savingAvailability ? (
@@ -1115,8 +1191,8 @@ export default function EventPageClient({ token }: { token: string }) {
                       Save Availability
                     </>
                   )}
-                </button>
-              </div>
+            </button>
+          </div>
             </>
           )}
         </section>
@@ -1124,47 +1200,47 @@ export default function EventPageClient({ token }: { token: string }) {
 
       {!isLoading &&
         data &&
-        (data.event.phase === 'RESULTS' ||
-          data.event.phase === 'FINALIZED' ||
-          (data.event.phase === 'PICK_DAYS' &&
-            (data.isHost || showResultsToEveryone))) && (
+        (data?.event?.phase === 'RESULTS' ||
+          data?.event?.phase === 'FINALIZED' ||
+          (data?.event?.phase === 'PICK_DAYS' &&
+            (data?.isHost || showResultsToEveryone))) && (
           <section className='card grid gap-4'>
             <div className='flex flex-wrap items-center justify-between gap-3'>
               <h2 className='text-lg font-semibold text-slate-900'>
                 Results & Suggestions
               </h2>
-              {data.isHost && data.event.phase === 'PICK_DAYS' && (
+              {data?.isHost && data?.event?.phase === 'PICK_DAYS' && (
                 <div className='flex items-center gap-2'>
                   <span className='text-sm text-slate-600'>
                     Show to everyone:
                   </span>
-                  <button
+                <button
                     type='button'
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 ${
-                      showResultsToEveryone ? 'bg-brand-600' : 'bg-slate-200'
-                    } ${updatingToggle ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 ${
+                    showResultsToEveryone ? 'bg-brand-600' : 'bg-slate-200'
+                  } ${updatingToggle ? 'opacity-50 cursor-not-allowed' : ''}`}
                     onClick={() =>
                       updateShowResultsToggle(!showResultsToEveryone)
                     }
-                    disabled={updatingToggle}
-                    aria-pressed={showResultsToEveryone}
-                    aria-label={`${showResultsToEveryone ? 'Hide' : 'Show'} results to everyone`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  disabled={updatingToggle}
+                  aria-pressed={showResultsToEveryone}
+                  aria-label={`${showResultsToEveryone ? 'Hide' : 'Show'} results to everyone`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
                         showResultsToEveryone
                           ? 'translate-x-6'
                           : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
+                    }`}
+                  />
+                </button>
                   <span className='text-xs text-slate-500'>
-                    {showResultsToEveryone ? 'Everyone can see' : 'Host only'}
-                  </span>
-                </div>
-              )}
-            </div>
-
+                  {showResultsToEveryone ? 'Everyone can see' : 'Host only'}
+                </span>
+              </div>
+            )}
+          </div>
+          
             <div className='grid gap-4'>
               <div className='grid gap-2'>
                 <div className='rounded-lg bg-green-50 border border-green-200 p-4'>
@@ -1173,46 +1249,46 @@ export default function EventPageClient({ token }: { token: string }) {
                   </h3>
                   <div className='grid gap-1 text-sm'>
                     <p className='text-green-800'>
-                      {topDates.length > 0
+                    {topDates.length > 0 
                         ? `Earliest all-available: ${format(new Date(topDates[0].date), 'PPP')} (${topDates[0].available}/${topDates[0].totalAttendees})`
                         : 'No dates where everyone is available'}
-                    </p>
-                    {topDates.length > 1 && (
+                  </p>
+                  {topDates.length > 1 && (
                       <p className='text-green-700'>
                         {`Earliest most-available: ${format(new Date(topDates[1].date), 'PPP')} (${topDates[1].available}/${topDates[1].totalAttendees})`}
-                      </p>
-                    )}
-                  </div>
+                    </p>
+                  )}
                 </div>
               </div>
-
-              <ResultsCalendar
-                startDate={data.event.startDate}
-                endDate={data.event.endDate}
-                availability={data.availability || []}
-                earliestAll={data.phaseSummary.earliestAll ?? null}
-                earliestMost={data.phaseSummary.earliestMost ?? null}
-                finalDate={data.event.finalDate || null}
-                totalAttendees={data.phaseSummary.totalParticipants}
+            </div>
+            
+            <ResultsCalendar 
+              startDate={data.event.startDate} 
+              endDate={data.event.endDate} 
+              availability={data.availability || []}
+                earliestAll={data?.phaseSummary?.earliestAll ?? null}
+                earliestMost={data?.phaseSummary?.earliestMost ?? null}
+                finalDate={data?.event?.finalDate || null}
+                totalAttendees={data?.phaseSummary?.totalParticipants}
                 onDateClick={
                   data.event.phase === 'RESULTS'
                     ? date => setFinalDraft(date)
                     : undefined
                 }
                 selectedDate={finalDraft !== 'clear' ? finalDraft : null}
-                isInteractive={data.event.phase === 'RESULTS'}
-              />
-            </div>
-          </section>
-        )}
+              isInteractive={data.event.phase === 'RESULTS'}
+            />
+          </div>
+        </section>
+      )}
 
       {/* Deadline Card - Above Host Controls */}
-      {data && data.phaseSummary.voteDeadline && (
+      {data && data?.phaseSummary?.voteDeadline && (
         <DeadlineCard
           voteDeadline={data.phaseSummary.voteDeadline}
-          phase={data.event.phase}
-          quorum={data.phaseSummary.quorum}
-          inCount={data.phaseSummary.inCount}
+          phase={data?.event?.phase}
+          quorum={data?.phaseSummary?.quorum}
+          inCount={data?.phaseSummary?.inCount}
           deadlineExpired={(data.phaseSummary as any).deadlineExpired}
           deadlineStatus={(data.phaseSummary as any).deadlineStatus}
         />
@@ -1229,13 +1305,13 @@ export default function EventPageClient({ token }: { token: string }) {
                 Host Controls
               </h2>
               <p className='text-slate-600'>
-                Manage your event's progress and settings
+                Manage your event&apos;s progress and settings
               </p>
             </div>
           </div>
 
           {/* Availability Progress Display */}
-          {data.event.phase === 'PICK_DAYS' && (
+          {data?.event?.phase === 'PICK_DAYS' && (
             <div className='p-4 bg-white rounded-xl border border-purple-200'>
               <div className='flex items-center gap-3 mb-4'>
                 <div className='w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center'>
@@ -1245,23 +1321,23 @@ export default function EventPageClient({ token }: { token: string }) {
                   Availability Progress
                 </h4>
               </div>
-
+              
               <div className='space-y-3'>
                 {/* Progress Summary */}
                 <div className='flex items-center justify-between p-3 bg-slate-50 rounded-lg'>
                   <span className='text-sm font-medium text-slate-700'>
-                    {data.availabilityProgress.completedAvailability} of{' '}
-                    {data.availabilityProgress.totalEligible} participants have
+                    {data?.availabilityProgress?.completedAvailability} of{' '}
+                    {data?.availabilityProgress?.totalEligible} participants have
                     set their availability
                   </span>
                   <div
                     className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                      data.availabilityProgress.isComplete
-                        ? 'bg-green-100 text-green-700'
-                        : 'bg-yellow-100 text-yellow-700'
+                      data?.availabilityProgress?.isComplete
+                      ? 'bg-green-100 text-green-700' 
+                      : 'bg-yellow-100 text-yellow-700'
                     }`}
                   >
-                    {data.availabilityProgress.isComplete
+                    {data?.availabilityProgress?.isComplete
                       ? '✅ Complete'
                       : '⏳ In Progress'}
                   </div>
@@ -1279,9 +1355,9 @@ export default function EventPageClient({ token }: { token: string }) {
                         <div className='flex items-center gap-3'>
                           <div
                             className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${
-                              attendee.hasSetAvailability
-                                ? 'bg-green-100 text-green-600'
-                                : 'bg-yellow-100 text-yellow-600'
+                            attendee.hasSetAvailability 
+                              ? 'bg-green-100 text-green-600' 
+                              : 'bg-yellow-100 text-yellow-600'
                             }`}
                           >
                             {attendee.hasSetAvailability ? '✅' : '⏳'}
@@ -1311,7 +1387,7 @@ export default function EventPageClient({ token }: { token: string }) {
                 </div>
 
                 {/* Action Hint */}
-                {data.availabilityProgress.isComplete ? (
+                {data?.availabilityProgress?.isComplete ? (
                   <div className='p-3 bg-green-50 border border-green-200 rounded-lg'>
                     <div className='flex items-center gap-2'>
                       <span className='text-green-600'>🎉</span>
@@ -1335,52 +1411,52 @@ export default function EventPageClient({ token }: { token: string }) {
               </div>
             </div>
           )}
-
+          
           <div className='grid gap-6'>
             <div className='flex flex-wrap gap-4'>
               {data.event.phase === 'VOTE' && (
-                <button
+                <button 
                   className='btn-primary flex items-center gap-2 px-6 py-3 text-base font-semibold'
                   onClick={() => updatePhase('PICK_DAYS')}
                 >
                   <span className='text-lg'>📅</span>
-                  Move to Availability Phase
-                </button>
-              )}
-              {data.event.phase === 'PICK_DAYS' && (
-                <button
+                Move to Availability Phase
+              </button>
+            )}
+              {data?.event?.phase === 'PICK_DAYS' && (
+                <button 
                   className={`flex items-center gap-2 px-6 py-3 text-base font-semibold ${
-                    data.availabilityProgress.isComplete
-                      ? 'btn-primary bg-green-600 hover:bg-green-700'
+                    data?.availabilityProgress?.isComplete
+                      ? 'btn-primary bg-green-600 hover:bg-green-700' 
                       : 'btn-primary bg-blue-600 hover:bg-blue-700'
                   }`}
                   onClick={() => updatePhase('RESULTS')}
                 >
                   <span className='text-lg'>
-                    {data.availabilityProgress.isComplete ? '🎉' : '📊'}
+                    {data?.availabilityProgress?.isComplete ? '🎉' : '📊'}
                   </span>
-                  {data.availabilityProgress.isComplete
+                  {data?.availabilityProgress?.isComplete
                     ? 'Ready for Results!'
-                    : `Move to Results (${data.availabilityProgress.completedAvailability}/${data.availabilityProgress.totalEligible} completed)`}
-                </button>
-              )}
-              {data.event.phase === 'RESULTS' && (
-                <button
+                    : `Move to Results (${data?.availabilityProgress?.completedAvailability}/${data?.availabilityProgress?.totalEligible} completed)`}
+              </button>
+            )}
+              {data?.event?.phase === 'RESULTS' && (
+                <button 
                   className='btn-primary flex items-center gap-2 px-6 py-3 text-base font-semibold'
                   onClick={() => updatePhase('FINALIZED')}
                 >
                   <span className='text-lg'>🎉</span>
-                  Finalize Event
-                </button>
-              )}
-            </div>
-
+                Finalize Event
+              </button>
+            )}
+          </div>
+          
             {data.event.phase === 'RESULTS' && (
               <div className='grid gap-6'>
                 <div className='text-center'>
                   <div className='w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4'>
                     <span className='text-blue-600 text-2xl'>🎯</span>
-                  </div>
+                </div>
                   <h3 className='text-2xl font-bold text-slate-900 mb-2'>
                     Pick Final Date
                   </h3>
@@ -1394,10 +1470,10 @@ export default function EventPageClient({ token }: { token: string }) {
                       <span className='text-green-700 font-medium'>
                         ✓ Final date set successfully!
                       </span>
-                    </div>
-                  )}
-                </div>
-
+                  </div>
+                )}
+              </div>
+              
                 <div className='bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-200'>
                   <div className='text-center mb-4'>
                     <h4 className='text-lg font-semibold text-slate-900 mb-2'>
@@ -1406,8 +1482,8 @@ export default function EventPageClient({ token }: { token: string }) {
                     <p className='text-sm text-slate-600'>
                       Click on a calendar date above to make your selection
                     </p>
-                  </div>
-
+                </div>
+                
                   <div className='text-center'>
                     <div className='inline-flex items-center gap-3 px-6 py-4 bg-white rounded-xl border-2 border-slate-200 shadow-sm'>
                       <div className='w-3 h-3 rounded-full bg-blue-500'></div>
@@ -1417,20 +1493,20 @@ export default function EventPageClient({ token }: { token: string }) {
                       {finalDraft && finalDraft !== 'clear' ? (
                         <span className='text-lg font-bold text-blue-600'>
                           {format(new Date(finalDraft), 'EEEE, MMMM d, yyyy')}
-                        </span>
-                      ) : (
+                      </span>
+                    ) : (
                         <span className='text-lg text-slate-400'>
                           No date selected
                         </span>
-                      )}
-                    </div>
+                    )}
                   </div>
                 </div>
-
+              </div>
+              
                 <div className='flex flex-col sm:flex-row gap-3'>
-                  <button
+                <button 
                     className='btn-primary flex-1 py-3 text-base font-semibold'
-                    onClick={() => setShowFinalDateConfirm(true)}
+                  onClick={() => setShowFinalDateConfirm(true)}
                     disabled={
                       !finalDraft ||
                       finalDraft === 'clear' ||
@@ -1440,45 +1516,45 @@ export default function EventPageClient({ token }: { token: string }) {
                     {finalDateStatus === 'setting' ? (
                       <>
                         <div className='w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2' />
-                        Setting Final Date...
-                      </>
-                    ) : (
-                      <>
+                      Setting Final Date...
+                    </>
+                  ) : (
+                    <>
                         <span className='mr-2'>🎯</span>
-                        Set Final Date
-                      </>
-                    )}
-                  </button>
-
-                  <button
+                  Set Final Date
+                    </>
+                  )}
+                </button>
+                
+                <button 
                     className='btn-secondary py-3 px-4 text-base'
                     onClick={() => setFinalDraft('clear')}
                     disabled={finalDateStatus === 'setting'}
                   >
                     <span className='mr-2'>🗑️</span>
-                    Clear Selection
-                  </button>
-                </div>
-
-                {hostActionError && (
+                  Clear Selection
+                </button>
+              </div>
+              
+              {hostActionError && (
                   <div className='p-4 bg-red-50 border border-red-200 rounded-lg'>
                     <div className='flex items-center gap-3'>
                       <span className='text-red-600 text-xl'>❌</span>
-                      <div>
+                    <div>
                         <div className='text-red-700 font-medium'>
                           Error setting final date
                         </div>
                         <div className='text-sm text-red-600'>
                           {hostActionError}
                         </div>
-                      </div>
                     </div>
-                  </div>
-                )}
               </div>
-            )}
+            </div>
+          )}
+            </div>
+          )}
           </div>
-
+          
           <div className='pt-6 border-t border-slate-200'>
             <div className='flex items-center justify-between'>
               <div>
@@ -1489,11 +1565,11 @@ export default function EventPageClient({ token }: { token: string }) {
                   Permanently delete this event and all its data
                 </p>
               </div>
-              <button
+            <button 
                 className='btn bg-red-600 hover:bg-red-700 text-white px-4 py-2 font-semibold'
-                onClick={handleDeleteEvent}
-                disabled={deletingEvent}
-              >
+              onClick={handleDeleteEvent}
+              disabled={deletingEvent}
+            >
                 {deletingEvent ? (
                   <>
                     <div className='w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2' />
@@ -1505,7 +1581,7 @@ export default function EventPageClient({ token }: { token: string }) {
                     Delete Event
                   </>
                 )}
-              </button>
+            </button>
             </div>
           </div>
         </section>
@@ -1525,7 +1601,7 @@ export default function EventPageClient({ token }: { token: string }) {
               <p className='text-slate-600 mb-6 text-lg'>
                 Are you ready to finalize your event with this date?
               </p>
-
+              
               <div className='bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 mb-8 border border-blue-200'>
                 <div className='text-2xl font-bold text-slate-900 mb-2'>
                   {format(new Date(finalDraft), 'EEEE, MMMM d, yyyy')}
@@ -1538,7 +1614,7 @@ export default function EventPageClient({ token }: { token: string }) {
                   <span>All attendees will be notified immediately</span>
                 </div>
               </div>
-
+              
               <div className='flex flex-col sm:flex-row gap-4'>
                 <button
                   className='btn-secondary flex-1 py-4 text-lg font-semibold'
@@ -1566,7 +1642,7 @@ export default function EventPageClient({ token }: { token: string }) {
                   )}
                 </button>
               </div>
-
+              
               {hostActionError && (
                 <div className='mt-6 p-4 bg-red-50 border border-red-200 rounded-lg'>
                   <div className='flex items-center gap-2'>
@@ -1594,7 +1670,7 @@ export default function EventPageClient({ token }: { token: string }) {
               </h3>
               <p className='text-slate-600 mb-6 text-lg'>
                 Choose a name to represent in this event. If the name is already
-                taken, you'll take over that person's progress.
+                taken, you&apos;ll take over that person&apos;s progress.
               </p>
 
               <div className='space-y-3 mb-8'>
@@ -1602,7 +1678,7 @@ export default function EventPageClient({ token }: { token: string }) {
                   <button
                     key={name.id}
                     className={`w-full p-4 rounded-xl border-2 text-left transition-colors ${
-                      name.takenBy
+                      name.takenBy 
                         ? name.claimedByLoggedUser
                           ? 'border-red-200 bg-red-50 text-slate-400 cursor-not-allowed'
                           : 'border-orange-200 bg-orange-50 text-slate-900 hover:border-orange-300 hover:bg-orange-100'
@@ -1632,7 +1708,7 @@ export default function EventPageClient({ token }: { token: string }) {
                   </button>
                 ))}
               </div>
-
+              
               <div className='flex gap-4'>
                 <button
                   className='btn-secondary flex-1 py-4 text-lg font-semibold'
@@ -1642,7 +1718,7 @@ export default function EventPageClient({ token }: { token: string }) {
                   Cancel
                 </button>
               </div>
-
+              
               {nameSwitchError && (
                 <div className='mt-6 p-4 bg-red-50 border border-red-200 rounded-lg'>
                   <div className='flex items-center gap-2'>

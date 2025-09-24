@@ -9,7 +9,7 @@ export async function GET() {
     const token = securityService.generateCSRFToken();
     
     return NextResponse.json({ 
-      token,
+      csrfToken: token,
       success: true 
     });
   } catch (error) {

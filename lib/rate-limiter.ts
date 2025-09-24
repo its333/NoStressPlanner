@@ -2,6 +2,7 @@
 // Professional rate limiting system for API routes
 
 import { NextRequest } from 'next/server';
+
 import { rateLimit, RateLimitError } from './error-handling';
 
 interface RateLimitConfig {
@@ -14,21 +15,23 @@ interface RateLimitConfig {
 const RATE_LIMITS = {
   // General API routes
   general: { limit: 100, windowMs: 15 * 60 * 1000 }, // 100 requests per 15 minutes
-  
+
   // Authentication routes
   auth: { limit: 10, windowMs: 15 * 60 * 1000 }, // 10 auth attempts per 15 minutes
-  
+
   // Event creation
   eventCreation: { limit: 5, windowMs: 60 * 60 * 1000 }, // 5 events per hour
-  
+
   // Voting/blocking
   voting: { limit: 50, windowMs: 60 * 1000 }, // 50 votes per minute
-  
+
   // File uploads
   upload: { limit: 10, windowMs: 60 * 1000 }, // 10 uploads per minute
 } as const;
 
-export function getRateLimitConfig(route: keyof typeof RATE_LIMITS): RateLimitConfig {
+export function getRateLimitConfig(
+  route: keyof typeof RATE_LIMITS
+): RateLimitConfig {
   return RATE_LIMITS[route];
 }
 
@@ -55,7 +58,8 @@ export function checkRateLimit(
 
   if (!isAllowed) {
     throw new RateLimitError(
-      config.message || `Rate limit exceeded. Maximum ${config.limit} requests per ${config.windowMs / 1000 / 60} minutes.`
+      config.message ||
+        `Rate limit exceeded. Maximum ${config.limit} requests per ${config.windowMs / 1000 / 60} minutes.`
     );
   }
 }
@@ -65,17 +69,15 @@ export function withRateLimit(
   config: RateLimitConfig,
   customIdentifier?: string
 ) {
-  return function <T extends any[], R>(
-    handler: (...args: T) => Promise<R>
-  ) {
+  return function <T extends any[], R>(handler: (...args: T) => Promise<R>) {
     return async (...args: T): Promise<R> => {
       // Extract NextRequest from args (assuming it's the first argument)
       const req = args[0] as NextRequest;
-      
+
       if (req) {
         checkRateLimit(req, config, customIdentifier);
       }
-      
+
       return handler(...args);
     };
   };

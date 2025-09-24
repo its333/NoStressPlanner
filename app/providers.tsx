@@ -1,8 +1,10 @@
 'use client';
-import type { ReactNode } from 'react';
-import { SessionProvider } from 'next-auth/react';
+
 import type { Session } from 'next-auth';
+import { SessionProvider } from 'next-auth/react';
+import type { ReactNode } from 'react';
 import { SWRConfig } from 'swr';
+
 import { AuthCallbackHandler } from '@/components/AuthCallbackHandler';
 
 interface ProvidersProps {
@@ -12,7 +14,7 @@ interface ProvidersProps {
 
 export function Providers({ children, session }: ProvidersProps) {
   return (
-    <SessionProvider 
+    <SessionProvider
       session={session}
       refetchInterval={5 * 60} // Refetch every 5 minutes to keep session in sync
       refetchOnWindowFocus={true} // Refetch when window gains focus

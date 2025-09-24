@@ -2,7 +2,6 @@
 // Comprehensive session validation utilities
 
 import { auth } from './auth';
-import { NextRequest } from 'next/server';
 
 export interface SessionValidationResult {
   isValid: boolean;
@@ -14,15 +13,15 @@ export interface SessionValidationResult {
 /**
  * Validate session with comprehensive error handling
  */
-export async function validateSession(_req?: NextRequest): Promise<SessionValidationResult> {
+export async function validateSession(): Promise<SessionValidationResult> {
   try {
     const session = await auth();
-    
+
     if (!session) {
       return {
         isValid: false,
         error: 'No session found',
-        details: { hasSession: false }
+        details: { hasSession: false },
       };
     }
 
@@ -30,7 +29,7 @@ export async function validateSession(_req?: NextRequest): Promise<SessionValida
       return {
         isValid: false,
         error: 'Session has no user data',
-        details: { hasSession: true, hasUser: false }
+        details: { hasSession: true, hasUser: false },
       };
     }
 
@@ -38,7 +37,7 @@ export async function validateSession(_req?: NextRequest): Promise<SessionValida
       return {
         isValid: false,
         error: 'User has no ID',
-        details: { hasSession: true, hasUser: true, hasUserId: false }
+        details: { hasSession: true, hasUser: true, hasUserId: false },
       };
     }
 
@@ -47,13 +46,13 @@ export async function validateSession(_req?: NextRequest): Promise<SessionValida
       return {
         isValid: false,
         error: 'Session expired',
-        details: { 
-          hasSession: true, 
-          hasUser: true, 
+        details: {
+          hasSession: true,
+          hasUser: true,
           hasUserId: true,
           expired: true,
-          expires: session.expires
-        }
+          expires: session.expires,
+        },
       };
     }
 
@@ -66,18 +65,18 @@ export async function validateSession(_req?: NextRequest): Promise<SessionValida
         hasUserId: true,
         userName: session.user.name,
         userEmail: session.user.email,
-        expires: session.expires
-      }
+        expires: session.expires,
+      },
     };
-
   } catch (error) {
     return {
       isValid: false,
-      error: error instanceof Error ? error.message : 'Unknown validation error',
-      details: { 
+      error:
+        error instanceof Error ? error.message : 'Unknown validation error',
+      details: {
         errorType: error instanceof Error ? error.constructor.name : 'Unknown',
-        stack: error instanceof Error ? error.stack : undefined
-      }
+        stack: error instanceof Error ? error.stack : undefined,
+      },
     };
   }
 }
@@ -85,20 +84,20 @@ export async function validateSession(_req?: NextRequest): Promise<SessionValida
 /**
  * Validate session and throw error if invalid
  */
-export async function requireValidSession(_req?: NextRequest): Promise<string> {
-  const validation = await validateSession(_req);
-  
+export async function requireValidSession(): Promise<string> {
+  const validation = await validateSession();
+
   if (!validation.isValid) {
     throw new Error(`Session validation failed: ${validation.error}`);
   }
-  
+
   return validation.userId!;
 }
 
 /**
  * Check if session is valid without throwing
  */
-export async function isSessionValid(_req?: NextRequest): Promise<boolean> {
-  const validation = await validateSession(_req);
+export async function isSessionValid(): Promise<boolean> {
+  const validation = await validateSession();
   return validation.isValid;
 }

@@ -75,7 +75,7 @@ export const POST = rateLimiters.voting(
         });
       } else {
         // Anonymous user: find session by selected person
-        const selectedPerson = await getSelectedPerson(event.id, req);
+        const selectedPerson = await getSelectedPerson(event.id);
         debugLog('Vote API: anonymous user session lookup', {
           selectedPerson,
           eventId: event.id,

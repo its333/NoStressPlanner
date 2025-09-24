@@ -203,7 +203,7 @@ export const POST = rateLimiters.general(
           userId,
           attendeeNameSlug: attendeeName.slug,
         });
-        await setSelectedPerson(event.id, attendeeName.slug, req);
+        await setSelectedPerson(event.id, attendeeName.slug);
       } else {
         console.log('🍪 Skipping cookie for logged-in user:', {
           userId,

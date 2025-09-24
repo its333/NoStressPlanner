@@ -1,8 +1,8 @@
 // lib/ultra-optimized-queries.ts
 // Ultra-optimized database queries for maximum performance
 
-import { prisma } from '@/lib/prisma';
 import { logger } from '@/lib/logger';
+import { prisma } from '@/lib/prisma';
 
 /**
  * Ultra-optimized event data fetching with minimal database calls
@@ -10,7 +10,7 @@ import { logger } from '@/lib/logger';
  */
 export async function getEventDataUltraOptimized(token: string) {
   const startTime = Date.now();
-  
+
   try {
     // Single query to get ALL event data with optimized includes
     const eventData = await prisma.inviteToken.findUnique({
@@ -36,15 +36,15 @@ export async function getEventDataUltraOptimized(token: string) {
                 id: true,
                 name: true,
                 email: true,
-                image: true
-              }
+                image: true,
+              },
             },
             attendeeNames: {
               select: {
                 id: true,
                 label: true,
-                slug: true
-              }
+                slug: true,
+              },
             },
             attendeeSessions: {
               where: { isActive: true },
@@ -61,35 +61,35 @@ export async function getEventDataUltraOptimized(token: string) {
                   select: {
                     id: true,
                     label: true,
-                    slug: true
-                  }
+                    slug: true,
+                  },
                 },
                 user: {
                   select: {
                     id: true,
                     name: true,
                     email: true,
-                    image: true
-                  }
-                }
-              }
+                    image: true,
+                  },
+                },
+              },
             },
             votes: {
               select: {
                 attendeeNameId: true,
-                in: true
-              }
+                in: true,
+              },
             },
             blocks: {
               select: {
                 attendeeNameId: true,
                 date: true,
-                anonymous: true
-              }
-            }
-          }
-        }
-      }
+                anonymous: true,
+              },
+            },
+          },
+        },
+      },
     });
 
     if (!eventData?.event) {
@@ -98,7 +98,7 @@ export async function getEventDataUltraOptimized(token: string) {
 
     const event = eventData.event;
     const executionTime = Date.now() - startTime;
-    
+
     logger.debug('Ultra-optimized event query executed', {
       token: token.substring(0, 8) + '...',
       executionTime,
@@ -106,7 +106,7 @@ export async function getEventDataUltraOptimized(token: string) {
       attendeeSessions: event.attendeeSessions.length,
       votes: event.votes.length,
       blocks: event.blocks.length,
-      optimized: true
+      optimized: true,
     });
 
     return event;
@@ -115,7 +115,7 @@ export async function getEventDataUltraOptimized(token: string) {
     logger.error('Ultra-optimized event query failed', {
       token: token.substring(0, 8) + '...',
       executionTime,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
     throw error;
   }
@@ -124,14 +124,18 @@ export async function getEventDataUltraOptimized(token: string) {
 /**
  * Optimized session lookup with minimal database impact
  */
-export async function getSessionOptimized(eventId: string, userId?: string, sessionKey?: string) {
+export async function getSessionOptimized(
+  eventId: string,
+  userId?: string,
+  sessionKey?: string
+) {
   const startTime = Date.now();
-  
+
   try {
     // Build optimized where clause
     const whereClause: any = {
       eventId,
-      isActive: true
+      isActive: true,
     };
 
     // Prioritize sessionKey over userId for better performance
@@ -158,18 +162,18 @@ export async function getSessionOptimized(eventId: string, userId?: string, sess
           select: {
             id: true,
             label: true,
-            slug: true
-          }
+            slug: true,
+          },
         },
         user: {
           select: {
             id: true,
             name: true,
             email: true,
-            image: true
-          }
-        }
-      }
+            image: true,
+          },
+        },
+      },
     });
 
     const executionTime = Date.now() - startTime;
@@ -177,7 +181,7 @@ export async function getSessionOptimized(eventId: string, userId?: string, sess
       eventId: eventId.substring(0, 8) + '...',
       executionTime,
       found: !!session,
-      method: sessionKey ? 'sessionKey' : 'userId'
+      method: sessionKey ? 'sessionKey' : 'userId',
     });
 
     return session;
@@ -186,7 +190,7 @@ export async function getSessionOptimized(eventId: string, userId?: string, sess
     logger.error('Optimized session lookup failed', {
       eventId: eventId.substring(0, 8) + '...',
       executionTime,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
     throw error;
   }
@@ -197,7 +201,7 @@ export async function getSessionOptimized(eventId: string, userId?: string, sess
  */
 export async function getMultipleEventsOptimized(tokens: string[]) {
   const startTime = Date.now();
-  
+
   try {
     const events = await prisma.inviteToken.findMany({
       where: { token: { in: tokens } },
@@ -215,25 +219,25 @@ export async function getMultipleEventsOptimized(tokens: string[]) {
             host: {
               select: {
                 id: true,
-                name: true
-              }
+                name: true,
+              },
             },
             votes: {
               select: {
                 attendeeNameId: true,
-                in: true
-              }
-            }
-          }
-        }
-      }
+                in: true,
+              },
+            },
+          },
+        },
+      },
     });
 
     const executionTime = Date.now() - startTime;
     logger.debug('Batch events query executed', {
       tokenCount: tokens.length,
       executionTime,
-      foundEvents: events.length
+      foundEvents: events.length,
     });
 
     return events;
@@ -242,7 +246,7 @@ export async function getMultipleEventsOptimized(tokens: string[]) {
     logger.error('Batch events query failed', {
       tokenCount: tokens.length,
       executionTime,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
     throw error;
   }
@@ -257,7 +261,7 @@ export function computeAvailabilityOptimized(
   days: Date[]
 ) {
   const startTime = Date.now();
-  
+
   try {
     const inSet = new Set(attendeesIn);
     const totalIn = attendeesIn.length;
@@ -266,7 +270,7 @@ export function computeAvailabilityOptimized(
     const blocksByDay = new Map<string, Set<string>>();
     for (const block of blocks) {
       if (!inSet.has(block.attendeeNameId)) continue;
-      
+
       const key = block.date.toISOString().split('T')[0];
       const set = blocksByDay.get(key) ?? new Set<string>();
       set.add(block.attendeeNameId);
@@ -274,12 +278,12 @@ export function computeAvailabilityOptimized(
     }
 
     // Calculate availability for each day
-    const availability = days.map((day) => {
+    const availability = days.map(day => {
       const key = day.toISOString().split('T')[0];
       const blocked = blocksByDay.get(key) ?? new Set<string>();
       const blockedCount = blocked.size;
       const available = Math.max(0, totalIn - blockedCount);
-      
+
       return {
         date: day,
         available,
@@ -288,7 +292,8 @@ export function computeAvailabilityOptimized(
     });
 
     // Find earliest all-available day
-    const earliestAll = availability.find((day) => day.available === totalIn) ?? null;
+    const earliestAll =
+      availability.find(day => day.available === totalIn) ?? null;
 
     // Find earliest most-available day
     let earliestMost = null;
@@ -310,20 +315,20 @@ export function computeAvailabilityOptimized(
       attendeesIn: attendeesIn.length,
       blocks: blocks.length,
       days: days.length,
-      executionTime
+      executionTime,
     });
 
     return {
       availability,
       earliestAll,
       earliestMost,
-      top3
+      top3,
     };
   } catch (error) {
     const executionTime = Date.now() - startTime;
     logger.error('Optimized availability calculation failed', {
       executionTime,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
     throw error;
   }

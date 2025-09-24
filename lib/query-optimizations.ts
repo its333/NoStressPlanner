@@ -1,7 +1,8 @@
 // lib/query-optimizations.ts
 // Specific query optimizations for common patterns
-import { prisma } from './prisma';
+
 import { logger } from './logger';
+import { prisma } from './prisma';
 
 // Query result cache for ultra-fast repeated requests
 const queryCache = new Map<string, { data: any; timestamp: number }>();
@@ -12,7 +13,7 @@ const QUERY_CACHE_TTL = 30 * 1000; // 30 seconds for query results
  */
 export async function getEventWithOptimizedIncludes(token: string) {
   const startTime = Date.now();
-  
+
   try {
     // Check cache first
     const cacheKey = `event_query:${token}`;
@@ -22,7 +23,7 @@ export async function getEventWithOptimizedIncludes(token: string) {
       logger.debug('Query cache hit', {
         token: token.substring(0, 8) + '...',
         executionTime,
-        cached: true
+        cached: true,
       });
       return cached.data;
     }
@@ -38,19 +39,19 @@ export async function getEventWithOptimizedIncludes(token: string) {
                 id: true,
                 name: true,
                 email: true,
-                image: true
-              }
+                image: true,
+              },
             },
             attendeeNames: {
               select: {
                 id: true,
                 label: true,
-                slug: true
-              }
-            }
-          }
-        }
-      }
+                slug: true,
+              },
+            },
+          },
+        },
+      },
     });
 
     if (!invite?.event) {
@@ -76,34 +77,34 @@ export async function getEventWithOptimizedIncludes(token: string) {
             select: {
               id: true,
               label: true,
-              slug: true
-            }
+              slug: true,
+            },
           },
           user: {
             select: {
               id: true,
               name: true,
               email: true,
-              image: true
-            }
-          }
-        }
+              image: true,
+            },
+          },
+        },
       }),
       prisma.vote.findMany({
         where: { eventId },
         select: {
           attendeeNameId: true,
-          in: true
-        }
+          in: true,
+        },
       }),
       prisma.dayBlock.findMany({
         where: { eventId },
         select: {
           attendeeNameId: true,
           date: true,
-          anonymous: true
-        }
-      })
+          anonymous: true,
+        },
+      }),
     ]);
 
     // STEP 3: Attach the data to the event object
@@ -111,7 +112,7 @@ export async function getEventWithOptimizedIncludes(token: string) {
       ...invite.event,
       attendeeSessions,
       votes,
-      blocks
+      blocks,
     };
 
     const executionTime = Date.now() - startTime;
@@ -122,15 +123,15 @@ export async function getEventWithOptimizedIncludes(token: string) {
       attendeeSessions: attendeeSessions.length,
       votes: votes.length,
       blocks: blocks.length,
-      cached: false
+      cached: false,
     });
 
     const result = { event };
-    
+
     // Cache the result
     queryCache.set(cacheKey, {
       data: result,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     });
 
     return result;
@@ -139,7 +140,7 @@ export async function getEventWithOptimizedIncludes(token: string) {
     logger.error('Ultra-optimized event query failed', {
       token: token.substring(0, 8) + '...',
       executionTime,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
     throw error;
   }
@@ -154,7 +155,7 @@ export async function findAttendeeSessionOptimized(
   userId?: string
 ) {
   const startTime = Date.now();
-  
+
   try {
     // Use a single query with OR conditions instead of multiple queries
     const session = await prisma.attendeeSession.findFirst({
@@ -163,32 +164,32 @@ export async function findAttendeeSessionOptimized(
         isActive: true,
         OR: [
           ...(sessionKey ? [{ sessionKey }] : []),
-          ...(userId ? [{ userId }] : [])
-        ]
+          ...(userId ? [{ userId }] : []),
+        ],
       },
       include: {
         attendeeName: {
           select: {
             id: true,
-            label: true
-          }
+            label: true,
+          },
         },
         user: {
           select: {
             id: true,
             name: true,
             email: true,
-            image: true
-          }
-        }
-      }
+            image: true,
+          },
+        },
+      },
     });
 
     const executionTime = Date.now() - startTime;
     logger.debug('Optimized attendee session query executed', {
       eventId: eventId.substring(0, 8) + '...',
       executionTime,
-      found: !!session
+      found: !!session,
     });
 
     return session;
@@ -197,7 +198,7 @@ export async function findAttendeeSessionOptimized(
     logger.error('Optimized attendee session query failed', {
       eventId: eventId.substring(0, 8) + '...',
       executionTime,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
     throw error;
   }
@@ -208,31 +209,31 @@ export async function findAttendeeSessionOptimized(
  */
 export async function computeAvailabilityOptimized(eventId: string) {
   const startTime = Date.now();
-  
+
   try {
     // Get all necessary data in parallel
     const [attendeeSessions, votes, dayBlocks] = await Promise.all([
       prisma.attendeeSession.findMany({
         where: { eventId, isActive: true },
-        select: { id: true }
+        select: { id: true },
       }),
       prisma.vote.findMany({
-        where: { 
+        where: {
           eventId,
-          in: true
+          in: true,
         },
-        select: { attendeeNameId: true }
+        select: { attendeeNameId: true },
       }),
       prisma.dayBlock.findMany({
-        where: { 
-          eventId
+        where: {
+          eventId,
         },
-        select: { 
+        select: {
           date: true,
           attendeeNameId: true,
-          anonymous: true
-        }
-      })
+          anonymous: true,
+        },
+      }),
     ]);
 
     const executionTime = Date.now() - startTime;
@@ -241,20 +242,20 @@ export async function computeAvailabilityOptimized(eventId: string) {
       executionTime,
       attendeeCount: attendeeSessions.length,
       voteCount: votes.length,
-      blockCount: dayBlocks.length
+      blockCount: dayBlocks.length,
     });
 
     return {
       attendeeSessions,
       votes,
-      dayBlocks
+      dayBlocks,
     };
   } catch (error) {
     const executionTime = Date.now() - startTime;
     logger.error('Optimized availability computation failed', {
       eventId: eventId.substring(0, 8) + '...',
       executionTime,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
     throw error;
   }
@@ -272,7 +273,7 @@ export async function batchUpdateEventData(
   }
 ) {
   const startTime = Date.now();
-  
+
   try {
     // Use a single update operation
     const updatedEvent = await prisma.event.update({
@@ -283,15 +284,15 @@ export async function batchUpdateEventData(
         phase: true,
         finalDate: true,
         showResultsToEveryone: true,
-        updatedAt: true
-      }
+        updatedAt: true,
+      },
     });
 
     const executionTime = Date.now() - startTime;
     logger.debug('Batch event update executed', {
       eventId: eventId.substring(0, 8) + '...',
       executionTime,
-      updates: Object.keys(updates)
+      updates: Object.keys(updates),
     });
 
     return updatedEvent;
@@ -300,7 +301,7 @@ export async function batchUpdateEventData(
     logger.error('Batch event update failed', {
       eventId: eventId.substring(0, 8) + '...',
       executionTime,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
     throw error;
   }
@@ -314,7 +315,7 @@ const USER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 export async function getUserOptimized(userId: string) {
   const startTime = Date.now();
-  
+
   try {
     // Check cache first
     const cached = userCache.get(userId);
@@ -322,7 +323,7 @@ export async function getUserOptimized(userId: string) {
       const executionTime = Date.now() - startTime;
       logger.debug('User cache hit', {
         userId: userId.substring(0, 8) + '...',
-        executionTime
+        executionTime,
       });
       return cached.user;
     }
@@ -336,15 +337,15 @@ export async function getUserOptimized(userId: string) {
         email: true,
         image: true,
         discordId: true,
-        createdAt: true
-      }
+        createdAt: true,
+      },
     });
 
     // Cache the result
     if (user) {
       userCache.set(userId, {
         user,
-        timestamp: Date.now()
+        timestamp: Date.now(),
       });
     }
 
@@ -353,7 +354,7 @@ export async function getUserOptimized(userId: string) {
       userId: userId.substring(0, 8) + '...',
       executionTime,
       found: !!user,
-      cached: false
+      cached: false,
     });
 
     return user;
@@ -362,7 +363,7 @@ export async function getUserOptimized(userId: string) {
     logger.error('Optimized user query failed', {
       userId: userId.substring(0, 8) + '...',
       executionTime,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
     throw error;
   }
@@ -382,7 +383,9 @@ export function clearUserCache(): void {
 export function clearQueryCache(token?: string): void {
   if (token) {
     queryCache.delete(`event_query:${token}`);
-    logger.debug('Query cache cleared for token', { token: token.substring(0, 8) + '...' });
+    logger.debug('Query cache cleared for token', {
+      token: token.substring(0, 8) + '...',
+    });
   } else {
     queryCache.clear();
     logger.debug('All query cache cleared');

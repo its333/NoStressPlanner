@@ -145,11 +145,7 @@ export function isDateInDragRange(date: string, dragState: DragState): boolean {
   return target >= rangeStart && target <= rangeEnd;
 }
 
-export function DragPreview({
-  dragState: _dragState,
-}: {
-  dragState: DragState;
-}) {
+export function DragPreview() {
   // No overlay at all - completely removed
   return null;
 }

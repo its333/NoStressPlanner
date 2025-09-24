@@ -3,8 +3,9 @@
 
 'use client';
 
-import { useEffect, useRef } from 'react';
 import Pusher from 'pusher-js';
+import { useEffect, useRef } from 'react';
+
 import { logger } from './logger';
 
 interface RealtimeEvent {
@@ -45,7 +46,7 @@ class ClientRealtimeManager {
       this.pusherClient = new Pusher(key, {
         cluster,
         forceTLS: true,
-        enabledTransports: ['ws', 'wss']
+        enabledTransports: ['ws', 'wss'],
       });
 
       this.pusherClient.connection.bind('connected', () => {
@@ -70,7 +71,6 @@ class ClientRealtimeManager {
         this.isConnected = false;
         this.handleReconnection();
       });
-
     } catch (error) {
       logger.error('Failed to initialize Pusher client', { error });
       this.pusherClient = null;
@@ -86,9 +86,11 @@ class ClientRealtimeManager {
 
     this.reconnectAttempts++;
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-    
-    logger.info(`Attempting reconnection ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`);
-    
+
+    logger.info(
+      `Attempting reconnection ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`
+    );
+
     setTimeout(() => {
       if (this.pusherClient) {
         this.pusherClient.connect();
@@ -114,40 +116,50 @@ class ClientRealtimeManager {
     return this.subscribeWithPolling(eventId, onEvent);
   }
 
-  private subscribeWithPusher(eventId: string, onEvent: (event: RealtimeEvent) => void): () => void {
+  private subscribeWithPusher(
+    eventId: string,
+    onEvent: (event: RealtimeEvent) => void
+  ): () => void {
     if (!this.pusherClient) {
       return this.subscribeWithPolling(eventId, onEvent);
     }
 
     const channel = this.pusherClient.subscribe(`event-${eventId}`);
-    
+
     const events = [
       'vote.updated',
-      'blocks.updated', 
+      'blocks.updated',
       'phase.changed',
       'final.date.set',
       'attendee.nameChanged',
       'attendee.joined',
       'attendee.left',
-      'showResults.changed'
+      'showResults.changed',
     ];
 
     const handlers = events.map(eventName => {
       const handler = (data: any) => {
-        logger.debug('Received Pusher event', { eventId, event: eventName, data });
+        logger.debug('Received Pusher event', {
+          eventId,
+          event: eventName,
+          data,
+        });
         onEvent({
           eventId,
           event: eventName,
           payload: data,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         });
       };
-      
+
       channel.bind(eventName, handler);
       return { eventName, handler };
     });
 
-    logger.info('Subscribed to Pusher channel', { eventId, events: events.length });
+    logger.info('Subscribed to Pusher channel', {
+      eventId,
+      events: events.length,
+    });
 
     // Return unsubscribe function
     return () => {
@@ -159,7 +171,10 @@ class ClientRealtimeManager {
     };
   }
 
-  private subscribeWithPolling(eventId: string, onEvent: (event: RealtimeEvent) => void): () => void {
+  private subscribeWithPolling(
+    eventId: string,
+    onEvent: (event: RealtimeEvent) => void
+  ): () => void {
     logger.info('Using polling fallback for real-time updates', { eventId });
 
     const pollInterval = 2000; // Poll every 2 seconds
@@ -170,26 +185,32 @@ class ClientRealtimeManager {
 
       try {
         // Check for updates by fetching the latest event data
-        const response = await fetch(`/api/events/${eventId}?refresh=${Date.now()}`, {
-          method: 'GET',
-          headers: {
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
+        const response = await fetch(
+          `/api/events/${eventId}?refresh=${Date.now()}`,
+          {
+            method: 'GET',
+            headers: {
+              'Cache-Control': 'no-cache',
+              Pragma: 'no-cache',
+            },
           }
-        });
+        );
 
         if (response.ok) {
           const data = await response.json();
           const currentTimestamp = Date.now();
 
           // Simple change detection - if this is the first poll or data has changed
-          if (this.lastEventTimestamp === 0 || currentTimestamp - this.lastEventTimestamp > pollInterval) {
+          if (
+            this.lastEventTimestamp === 0 ||
+            currentTimestamp - this.lastEventTimestamp > pollInterval
+          ) {
             logger.debug('Polling detected data change', { eventId });
             onEvent({
               eventId,
               event: 'polling.update',
               payload: data,
-              timestamp: currentTimestamp
+              timestamp: currentTimestamp,
             });
             this.lastEventTimestamp = currentTimestamp;
           }
@@ -219,7 +240,7 @@ class ClientRealtimeManager {
       isConnected: this.isConnected,
       hasPusherClient: !!this.pusherClient,
       reconnectAttempts: this.reconnectAttempts,
-      usingFallback: !this.pusherClient || !this.isConnected
+      usingFallback: !this.pusherClient || !this.isConnected,
     };
   }
 
@@ -259,7 +280,7 @@ export function useRealtime(config: ClientRealtimeConfig) {
 
   return {
     status: clientRealtime.getStatus(),
-    reconnect: () => clientRealtime.reconnect()
+    reconnect: () => clientRealtime.reconnect(),
   };
 }
 

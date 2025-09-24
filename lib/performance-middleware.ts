@@ -1,8 +1,10 @@
 // lib/performance-middleware.ts
 // Performance monitoring middleware for API routes
+
 import { NextRequest } from 'next/server';
-import { monitoringService } from './monitoring';
+
 import { logger } from './logger';
+import { monitoringService } from './monitoring';
 
 export interface PerformanceContext {
   startTime: number;
@@ -19,16 +21,16 @@ export function withPerformanceMonitoring<T extends any[], R>(
   return async (...args: T): Promise<R> => {
     const req = args[0] as NextRequest;
     const startTime = Date.now();
-    
+
     const context: PerformanceContext = {
       startTime,
       endpoint: req.nextUrl.pathname,
-      method: req.method
+      method: req.method,
     };
 
     try {
       const result = await handler(...args);
-      
+
       // Record successful request
       const responseTime = Date.now() - startTime;
       monitoringService.recordApiPerformance(
@@ -42,7 +44,7 @@ export function withPerformanceMonitoring<T extends any[], R>(
         endpoint: context.endpoint,
         method: context.method,
         responseTime,
-        statusCode: 200
+        statusCode: 200,
       });
 
       return result;
@@ -50,7 +52,7 @@ export function withPerformanceMonitoring<T extends any[], R>(
       // Record failed request
       const responseTime = Date.now() - startTime;
       const statusCode = getStatusCodeFromError(error);
-      
+
       monitoringService.recordApiPerformance(
         context.endpoint,
         context.method,
@@ -64,7 +66,7 @@ export function withPerformanceMonitoring<T extends any[], R>(
         method: context.method,
         responseTime,
         statusCode,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
       });
 
       throw error;

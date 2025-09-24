@@ -37,7 +37,7 @@ export const GET = monitorApiRoute(
         return NextResponse.json({ error: 'Event not found' }, { status: 404 });
       }
 
-      const selectedPerson = await getSelectedPerson(event.id, req);
+      const selectedPerson = await getSelectedPerson(event.id);
 
       // Create browser-specific cache key using request headers for better isolation
       const userAgent = req.headers.get('user-agent') || '';

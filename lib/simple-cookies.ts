@@ -6,8 +6,7 @@
 import { cookies } from 'next/headers';
 
 export async function getSelectedPerson(
-  eventId: string,
-  _req?: any
+  eventId: string
 ): Promise<string | null> {
   try {
     console.log(
@@ -37,8 +36,7 @@ export async function getSelectedPerson(
 
 export async function setSelectedPerson(
   eventId: string,
-  personSlug: string,
-  _req?: any
+  personSlug: string
 ): Promise<void> {
   try {
     console.log('🍪 Setting selected person cookie:', {

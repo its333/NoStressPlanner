@@ -1,5 +1,6 @@
-import { prisma } from '@/lib/prisma';
 import type { EventPhase } from '@prisma/client';
+
+import { prisma } from '@/lib/prisma';
 
 export interface UserEventSummary {
   id: string;
@@ -35,8 +36,8 @@ export async function getUserEvents(userId: string): Promise<UserEventsResult> {
   });
 
   const hostingSummaries: UserEventSummary[] = hosting
-    .filter((event) => event.invite)
-    .map((event) => ({
+    .filter(event => event.invite)
+    .map(event => ({
       id: event.id,
       title: event.title,
       startDate: event.startDate,
@@ -47,7 +48,7 @@ export async function getUserEvents(userId: string): Promise<UserEventsResult> {
       token: event.invite!.token,
     }));
 
-  const hostingIds = new Set(hostingSummaries.map((event) => event.id));
+  const hostingIds = new Set(hostingSummaries.map(event => event.id));
 
   const attendingSummaries: UserEventSummary[] = [];
   const seenAttending = new Set<string>();

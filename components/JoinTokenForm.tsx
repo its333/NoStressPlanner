@@ -1,6 +1,7 @@
 'use client';
-import { useState } from 'react';
+
 import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 
 export default function JoinTokenForm() {
   const [token, setToken] = useState('');
@@ -13,19 +14,19 @@ export default function JoinTokenForm() {
   }
 
   return (
-    <form className="card grid gap-3" onSubmit={handleSubmit}>
-      <label className="label" htmlFor="token">
+    <form className='card grid gap-3' onSubmit={handleSubmit}>
+      <label className='label' htmlFor='token'>
         Invite token
       </label>
       <input
-        id="token"
-        className="input"
+        id='token'
+        className='input'
         value={token}
-        onChange={(event) => setToken(event.target.value)}
-        placeholder="Enter the invite token from your host"
+        onChange={event => setToken(event.target.value)}
+        placeholder='Enter the invite token from your host'
         required
       />
-      <button type="submit" className="btn-primary w-full">
+      <button type='submit' className='btn-primary w-full'>
         Go to event
       </button>
     </form>

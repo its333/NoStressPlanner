@@ -52,7 +52,7 @@ export const DELETE = rateLimiters.general(
         attendeeSession = event.attendeeSessions.find(s => s.userId === userId);
       } else {
         // Anonymous user: find session by selected person
-        const selectedPerson = await getSelectedPerson(event.id, _req);
+        const selectedPerson = await getSelectedPerson(event.id);
         if (selectedPerson) {
           const selectedAttendeeName = event.attendeeNames.find(
             name => name.slug === selectedPerson

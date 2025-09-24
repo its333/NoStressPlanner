@@ -1,11 +1,13 @@
 // lib/realtime.ts
 // Enhanced real-time communication with optimizations and fallback
+
 import Pusher from 'pusher';
-import { eventBatcher } from './event-batcher';
+
 import { connectionManager } from './connection-manager';
+import { eventBatcher } from './event-batcher';
 import { eventOptimizer } from './event-optimizer';
-import { fallbackRealtime } from './realtime-fallback';
 import { logger } from './logger';
+import { fallbackRealtime } from './realtime-fallback';
 
 const appId = process.env.PUSHER_APP_ID;
 const key = process.env.PUSHER_KEY;
@@ -26,16 +28,16 @@ const serverPusher = enabled
 
 // Log configuration status
 if (enabled) {
-  logger.info('Pusher real-time system enabled', { 
+  logger.info('Pusher real-time system enabled', {
     appId: appId?.substring(0, 8) + '...',
-    cluster 
+    cluster,
   });
 } else {
   logger.warn('Pusher real-time system disabled - using fallback', {
     hasAppId: !!appId,
     hasKey: !!key,
     hasSecret: !!secret,
-    hasCluster: !!cluster
+    hasCluster: !!cluster,
   });
 }
 
@@ -54,14 +56,14 @@ export async function emit(eventId: string, event: string, payload: unknown) {
       eventId,
       timestamp: Date.now(),
       data: payload,
-      size: JSON.stringify(payload).length
+      size: JSON.stringify(payload).length,
     });
 
     // Validate payload size
     if (!eventOptimizer.validatePayloadSize(optimizedPayload)) {
       logger.warn('Large payload detected, splitting', { eventId, event });
       const splitPayloads = eventOptimizer.splitLargePayload(optimizedPayload);
-      
+
       for (const splitPayload of splitPayloads) {
         await serverPusher.trigger(`event-${eventId}`, event, splitPayload);
       }
@@ -71,19 +73,31 @@ export async function emit(eventId: string, event: string, payload: unknown) {
 
     logger.debug('Pusher event emitted successfully', { eventId, event });
   } catch (error) {
-    logger.error('Failed to emit Pusher event, falling back', { eventId, event, error });
+    logger.error('Failed to emit Pusher event, falling back', {
+      eventId,
+      event,
+      error,
+    });
     // Fallback to local system if Pusher fails
     await fallbackRealtime.emit(eventId, event, payload);
   }
 }
 
 // Batched emit for high-frequency events
-export async function emitBatched(eventId: string, event: string, payload: unknown) {
+export async function emitBatched(
+  eventId: string,
+  event: string,
+  payload: unknown
+) {
   await eventBatcher.addEvent(eventId, event, payload);
 }
 
 // Connection management
-export function addConnection(eventId: string, connectionId: string, info?: any) {
+export function addConnection(
+  eventId: string,
+  connectionId: string,
+  info?: any
+) {
   connectionManager.addConnection(eventId, connectionId, info);
 }
 
@@ -100,33 +114,77 @@ export function getConnectionStats(eventId: string) {
 }
 
 // Optimized event helpers
-export async function emitVoteUpdate(eventId: string, attendeeNameId: string, voteIn: boolean) {
-  const payload = eventOptimizer.optimizeVoteEvent(eventId, attendeeNameId, voteIn);
+export async function emitVoteUpdate(
+  eventId: string,
+  attendeeNameId: string,
+  voteIn: boolean
+) {
+  const payload = eventOptimizer.optimizeVoteEvent(
+    eventId,
+    attendeeNameId,
+    voteIn
+  );
   await emitBatched(eventId, 'vote.updated', payload.data);
 }
 
-export async function emitBlockUpdate(eventId: string, attendeeNameId: string, date: string, action: 'add' | 'remove') {
-  const payload = eventOptimizer.optimizeBlockEvent(eventId, attendeeNameId, date, action);
+export async function emitBlockUpdate(
+  eventId: string,
+  attendeeNameId: string,
+  date: string,
+  action: 'add' | 'remove'
+) {
+  const payload = eventOptimizer.optimizeBlockEvent(
+    eventId,
+    attendeeNameId,
+    date,
+    action
+  );
   await emitBatched(eventId, 'blocks.updated', payload.data);
 }
 
-export async function emitPhaseChange(eventId: string, phase: string, reason?: string) {
+export async function emitPhaseChange(
+  eventId: string,
+  phase: string,
+  reason?: string
+) {
   const payload = eventOptimizer.optimizePhaseEvent(eventId, phase, reason);
   await emit(eventId, 'phase.changed', payload.data);
 }
 
-export async function emitAttendeeUpdate(eventId: string, attendeeId: string, action: 'joined' | 'left' | 'switched') {
-  const payload = eventOptimizer.optimizeAttendeeEvent(eventId, attendeeId, action);
+export async function emitAttendeeUpdate(
+  eventId: string,
+  attendeeId: string,
+  action: 'joined' | 'left' | 'switched'
+) {
+  const payload = eventOptimizer.optimizeAttendeeEvent(
+    eventId,
+    attendeeId,
+    action
+  );
   await emit(eventId, 'attendee.updated', payload.data);
 }
 
-export async function emitFinalDateSet(eventId: string, finalDate: string, setBy: string) {
-  const payload = eventOptimizer.optimizeFinalDateEvent(eventId, finalDate, setBy);
+export async function emitFinalDateSet(
+  eventId: string,
+  finalDate: string,
+  setBy: string
+) {
+  const payload = eventOptimizer.optimizeFinalDateEvent(
+    eventId,
+    finalDate,
+    setBy
+  );
   await emit(eventId, 'final.date.set', payload.data);
 }
 
-export async function emitAvailabilityUpdate(eventId: string, availability: any[]) {
-  const payload = eventOptimizer.optimizeAvailabilityEvent(eventId, availability);
+export async function emitAvailabilityUpdate(
+  eventId: string,
+  availability: any[]
+) {
+  const payload = eventOptimizer.optimizeAvailabilityEvent(
+    eventId,
+    availability
+  );
   await emitBatched(eventId, 'availability.updated', payload.data);
 }
 

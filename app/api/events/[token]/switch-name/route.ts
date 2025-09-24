@@ -93,7 +93,7 @@ export const POST = rateLimiters.general(
         currentSession = activeSessions.find(s => s.userId === userId);
       } else {
         // Anonymous user: find session by selected person
-        const selectedPerson = await getSelectedPerson(event.id, req);
+        const selectedPerson = await getSelectedPerson(event.id);
         if (selectedPerson) {
           const selectedAttendeeName = event.attendeeNames.find(
             name => name.slug === selectedPerson

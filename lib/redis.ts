@@ -2,6 +2,7 @@
 // Redis connection manager with connection pooling and error handling
 
 import Redis from 'ioredis';
+
 import { logger } from './logger';
 
 interface RedisConfig {
@@ -39,13 +40,13 @@ class RedisManager {
 
     try {
       this.client = new Redis(this.config);
-      
+
       this.client.on('connect', () => {
         this.isConnected = true;
         logger.info('Redis connected successfully');
       });
 
-      this.client.on('error', (error) => {
+      this.client.on('error', error => {
         this.isConnected = false;
         logger.error('Redis connection error', { error: error.message });
       });
@@ -189,7 +190,7 @@ const redisManager = new RedisManager();
 
 // Auto-connect in production
 if (process.env.NODE_ENV === 'production') {
-  redisManager.connect().catch((error) => {
+  redisManager.connect().catch(error => {
     logger.error('Failed to auto-connect Redis', { error });
   });
 }

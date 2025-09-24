@@ -2,14 +2,17 @@
 // Button component for deleting all events with confirmation
 
 'use client';
-import { useState } from 'react';
+
 import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 
 interface DeleteAllEventsButtonProps {
   eventCount: number;
 }
 
-export default function DeleteAllEventsButton({ eventCount }: DeleteAllEventsButtonProps) {
+export default function DeleteAllEventsButton({
+  eventCount,
+}: DeleteAllEventsButtonProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const router = useRouter();
@@ -21,7 +24,7 @@ export default function DeleteAllEventsButton({ eventCount }: DeleteAllEventsBut
     }
 
     setIsDeleting(true);
-    
+
     try {
       const response = await fetch('/api/user/delete-all-events', {
         method: 'POST',
@@ -38,13 +41,14 @@ export default function DeleteAllEventsButton({ eventCount }: DeleteAllEventsBut
 
       // Show success message
       alert(`Successfully deleted ${result.deletedCount} events!`);
-      
+
       // Refresh the page to show updated state
       router.refresh();
-      
     } catch (error) {
       console.error('Error deleting events:', error);
-      alert(`Error: ${error instanceof Error ? error.message : 'Failed to delete events'}`);
+      alert(
+        `Error: ${error instanceof Error ? error.message : 'Failed to delete events'}`
+      );
     } finally {
       setIsDeleting(false);
       setShowConfirm(false);
@@ -60,13 +64,13 @@ export default function DeleteAllEventsButton({ eventCount }: DeleteAllEventsBut
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className='flex items-center gap-2'>
       {showConfirm && (
-        <div className="flex items-center gap-2 text-sm text-red-600">
+        <div className='flex items-center gap-2 text-sm text-red-600'>
           <span>Delete all {eventCount} events?</span>
           <button
             onClick={handleCancel}
-            className="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded"
+            className='text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded'
             disabled={isDeleting}
           >
             Cancel
@@ -82,7 +86,11 @@ export default function DeleteAllEventsButton({ eventCount }: DeleteAllEventsBut
             : 'bg-red-50 hover:bg-red-100 text-red-700 border border-red-200'
         } ${isDeleting ? 'opacity-50 cursor-not-allowed' : ''}`}
       >
-        {isDeleting ? 'Deleting...' : showConfirm ? 'Confirm Delete' : 'Delete All Events'}
+        {isDeleting
+          ? 'Deleting...'
+          : showConfirm
+            ? 'Confirm Delete'
+            : 'Delete All Events'}
       </button>
     </div>
   );

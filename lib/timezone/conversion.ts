@@ -1,21 +1,25 @@
 /**
  * TIMEZONE CONVERSION UTILITIES
- * 
+ *
  * This module handles conversion between UTC and Local timezones.
  * Use this when you need to convert between the two systems.
- * 
+ *
  * IMPORTANT: Always be explicit about which timezone you're working with!
  */
 
-import { createUtcDate, UtcDateRange } from './utc';
 import { createLocalDate, LocalDateRange } from './local';
+import { createUtcDate, UtcDateRange } from './utc';
 
 /**
  * Convert UTC date to Local date
  * Preserves the same calendar date in user's timezone
  */
 export function utcToLocal(utcDate: Date): Date {
-  return new Date(utcDate.getUTCFullYear(), utcDate.getUTCMonth(), utcDate.getUTCDate());
+  return new Date(
+    utcDate.getUTCFullYear(),
+    utcDate.getUTCMonth(),
+    utcDate.getUTCDate()
+  );
 }
 
 /**
@@ -23,7 +27,9 @@ export function utcToLocal(utcDate: Date): Date {
  * Preserves the same calendar date in UTC
  */
 export function localToUtc(localDate: Date): Date {
-  return new Date(Date.UTC(localDate.getFullYear(), localDate.getMonth(), localDate.getDate()));
+  return new Date(
+    Date.UTC(localDate.getFullYear(), localDate.getMonth(), localDate.getDate())
+  );
 }
 
 /**
@@ -101,5 +107,8 @@ export function getTimezoneName(): string {
 export function isDST(date: Date): boolean {
   const jan = new Date(date.getFullYear(), 0, 1);
   const jul = new Date(date.getFullYear(), 6, 1);
-  return date.getTimezoneOffset() < Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset());
+  return (
+    date.getTimezoneOffset() <
+    Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset())
+  );
 }

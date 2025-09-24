@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
-import { useState, type FormEvent, useEffect } from 'react';
+import { useState, type FormEvent, useEffect, useRef } from 'react';
 
 type NameRow = {
   label: string;
@@ -48,19 +48,24 @@ export default function HostEventForm() {
   const [names, setNames] = useState<NameRow[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const initializedRef = useRef(false);
 
-  // Initialize names with host's name first, then default names
+  // Initialize names with host's name first, then default names (only once)
   useEffect(() => {
-    const hostName = session?.user?.name || 'Host';
-    const hostSlug = slugify(hostName, 'host');
+    // Only initialize once, even if session changes
+    if (!initializedRef.current && session?.user?.name) {
+      const hostName = session.user.name;
+      const hostSlug = slugify(hostName, 'host');
 
-    setNames([
-      { label: hostName, slug: hostSlug },
-      { label: 'Alex', slug: 'alex' },
-      { label: 'Bailey', slug: 'bailey' },
-      { label: 'Casey', slug: 'casey' },
-    ]);
-  }, [session]);
+      setNames([
+        { label: hostName, slug: hostSlug },
+        { label: 'Alex', slug: 'alex' },
+        { label: 'Bailey', slug: 'bailey' },
+        { label: 'Casey', slug: 'casey' },
+      ]);
+      initializedRef.current = true;
+    }
+  }, [session?.user?.name]);
 
   function updateName(index: number, next: Partial<NameRow>) {
     setNames(current => {

@@ -23,8 +23,9 @@ export const POST = rateLimiters.general(
       req: NextRequest,
       context: { params: Promise<{ token: string }> }
     ) => {
-      const json = await req.json().catch(() => null);
-      debugLog('Phase API: request received', json);
+      try {
+        const json = await req.json().catch(() => null);
+        debugLog('Phase API: request received', json);
       const parsed = phaseSchema.safeParse(json);
       if (!parsed.success) {
         debugLog('Phase API: validation failed', parsed.error.flatten());
@@ -109,6 +110,13 @@ export const POST = rateLimiters.general(
       await invalidateEventOperationCache(token, 'phase');
 
       return NextResponse.json({ ok: true });
+      } catch (error) {
+        debugLog('Phase API: error occurred', error);
+        return NextResponse.json(
+          { error: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' },
+          { status: 500 }
+        );
+      }
     }
   )
 );

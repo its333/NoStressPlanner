@@ -45,7 +45,6 @@ describe('validators', () => {
   describe('voteSchema', () => {
     it('requires the in property to be a boolean', () => {
       expect(voteSchema.parse({ in: true }).in).toBe(true);
-      // @ts-expect-error testing runtime validation
       expect(() => voteSchema.parse({ in: 'yes' })).toThrow();
     });
   });

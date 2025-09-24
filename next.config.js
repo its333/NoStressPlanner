@@ -1,12 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   eslint: {
-    // Disable ESLint during builds to allow deployment
-    ignoreDuringBuilds: true,
+    // Re-enable ESLint during builds with lenient config
+    ignoreDuringBuilds: false,
   },
   typescript: {
-    // Disable TypeScript errors during builds
-    ignoreBuildErrors: true,
+    // Re-enable TypeScript errors during builds
+    ignoreBuildErrors: false,
   },
 };
 

@@ -43,7 +43,6 @@ class SecurityService {
    * Get Content Security Policy
    */
   private getCSP(): string {
-    const isProduction = process.env.NODE_ENV === 'production';
     const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000';
 
     const directives = [
@@ -144,9 +143,12 @@ class SecurityService {
       if (sessionId && tokenData.sessionId !== sessionId) {
         // If user is authenticated but token was generated for anonymous, allow it
         if (sessionId !== 'anonymous' && tokenData.sessionId === 'anonymous') {
-          logger.debug('CSRF validation: allowing anonymous token for authenticated user', {
-            userId: sessionId.substring(0, 8) + '...',
-          });
+          logger.debug(
+            'CSRF validation: allowing anonymous token for authenticated user',
+            {
+              userId: sessionId.substring(0, 8) + '...',
+            }
+          );
         } else {
           logger.warn('CSRF validation failed: session ID mismatch', {
             expected: sessionId.substring(0, 8) + '...',

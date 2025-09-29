@@ -1,6 +1,6 @@
 'use client';
 
-import { format, isAfter } from 'date-fns';
+import { isAfter } from 'date-fns';
 import { useSession } from 'next-auth/react';
 import Pusher from 'pusher-js';
 import { useCallback, useEffect, useState } from 'react';
@@ -12,6 +12,70 @@ import LoginPrompt from '@/components/LoginPrompt';
 import PhaseBar from '@/components/PhaseBar';
 import PickNameCard from '@/components/PickNameCard';
 import ResultsCalendar from '@/components/ResultsCalendar';
+import { formatInTimeZone, type TimeZoneFormatPreset } from '@/lib/timezone';
+
+const DATE_ONLY_PRESETS: ReadonlySet<TimeZoneFormatPreset> = new Set([
+  'mediumDate',
+  'weekdayLong',
+  'shortMonthDay',
+]);
+
+function normalizeDateForTimeZone(
+  value: string | Date,
+  timeZone: string
+): Date | null {
+  const iso = typeof value === 'string' ? value : value.toISOString();
+  const datePart = iso.split('T')[0];
+  if (!datePart || !/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    return typeof value === 'string' ? new Date(iso) : value;
+  }
+
+  const [year, month, day] = datePart.split('-').map(Number);
+  if ([year, month, day].some(part => Number.isNaN(part))) {
+    return null;
+  }
+
+  const baseUtc = new Date(Date.UTC(year, month - 1, day));
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+    const parts = formatter.formatToParts(baseUtc);
+    const mapped: Record<string, string> = {};
+    for (const part of parts) {
+      if (part.type !== 'literal') {
+        mapped[part.type] = part.value;
+      }
+    }
+
+    if (!mapped.year || !mapped.month || !mapped.day) {
+      return baseUtc;
+    }
+
+    const zonedUtc = Date.UTC(
+      Number(mapped.year),
+      Number(mapped.month) - 1,
+      Number(mapped.day),
+      mapped.hour ? Number(mapped.hour) : 0,
+      mapped.minute ? Number(mapped.minute) : 0,
+      mapped.second ? Number(mapped.second) : 0
+    );
+
+    const offset = zonedUtc - baseUtc.getTime();
+    return new Date(baseUtc.getTime() - offset);
+  } catch (error) {
+    console.error('timezone-normalization-error', { value, timeZone, error });
+    return baseUtc;
+  }
+}
+
 import { debugLog } from '@/lib/debug';
 import type { AttendeeNameStatus, JoinSuccessResponse } from '@/types/api';
 
@@ -767,6 +831,30 @@ export default function EventPageClient({ token }: { token: string }) {
   );
 
   const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const displayTimeZone = data?.you?.timeZone || browserTz || 'UTC';
+
+  const formatForDisplay = useCallback(
+    (
+      value: string | Date | null | undefined,
+      preset: TimeZoneFormatPreset = 'mediumDate'
+    ) => {
+      if (!value) {
+        return '';
+      }
+
+      if (preset === 'dateTime') {
+        return formatInTimeZone(value, displayTimeZone, preset);
+      }
+
+      const normalizedValue = DATE_ONLY_PRESETS.has(preset)
+        ? (normalizeDateForTimeZone(value, displayTimeZone) ?? value)
+        : value;
+
+      return formatInTimeZone(normalizedValue, displayTimeZone, preset);
+    },
+    [displayTimeZone]
+  );
+
   const voteDeadline = data?.phaseSummary?.voteDeadline
     ? new Date(data.phaseSummary.voteDeadline)
     : null;
@@ -788,6 +876,9 @@ export default function EventPageClient({ token }: { token: string }) {
       {isLoading && <p className='text-sm text-slate-500'>Loading event...</p>}
 
       {data && <PhaseBar phase={data?.event?.phase} />}
+      <p className='text-xs text-slate-500 text-right'>
+        Times shown in {displayTimeZone}
+      </p>
 
       {/* Phase Change Notification */}
       {phaseChangeNotification && (
@@ -819,10 +910,7 @@ export default function EventPageClient({ token }: { token: string }) {
 
               <div className='bg-white rounded-2xl p-8 border-2 border-green-200 shadow-lg max-w-md mx-auto'>
                 <div className='text-2xl font-bold text-slate-900 mb-2'>
-                  {format(
-                    new Date(data?.event?.finalDate),
-                    'EEEE, MMMM d, yyyy'
-                  )}
+                  {formatForDisplay(data?.event?.finalDate, 'weekdayLong')}
                 </div>
                 <div className='text-lg text-slate-600 mb-4'>
                   Final Event Date
@@ -929,7 +1017,10 @@ export default function EventPageClient({ token }: { token: string }) {
               <p>
                 Deadline{' '}
                 {data?.phaseSummary?.voteDeadline
-                  ? format(new Date(data?.phaseSummary?.voteDeadline), 'PPpp')
+                  ? formatForDisplay(
+                      data?.phaseSummary?.voteDeadline,
+                      'dateTime'
+                    )
                   : 'No deadline'}
               </p>
             </div>
@@ -943,10 +1034,7 @@ export default function EventPageClient({ token }: { token: string }) {
                 </span>
                 <span className='text-xs text-green-600'>
                   Final date:{' '}
-                  {format(
-                    new Date(data?.event?.finalDate),
-                    'EEEE, MMMM d, yyyy'
-                  )}
+                  {formatForDisplay(data?.event?.finalDate, 'weekdayLong')}
                 </span>
               </div>
             </div>
@@ -1113,8 +1201,8 @@ export default function EventPageClient({ token }: { token: string }) {
 
           {voteClosed && (
             <p className='text-sm text-slate-500 text-center'>
-              Voting is closed. The deadline was {format(voteDeadline!, 'PPpp')}
-              .
+              Voting is closed. The deadline was{' '}
+              {formatForDisplay(voteDeadline, 'dateTime')}.
             </p>
           )}
         </section>
@@ -1284,12 +1372,12 @@ export default function EventPageClient({ token }: { token: string }) {
                   <div className='grid gap-1 text-sm'>
                     <p className='text-green-800'>
                       {topDates.length > 0
-                        ? `Earliest all-available: ${format(new Date(topDates[0].date), 'PPP')} (${topDates[0].available}/${topDates[0].totalAttendees})`
+                        ? `Earliest all-available: ${formatForDisplay(topDates[0].date, 'mediumDate')} (${topDates[0].available}/${topDates[0].totalAttendees})`
                         : 'No dates where everyone is available'}
                     </p>
                     {topDates.length > 1 && (
                       <p className='text-green-700'>
-                        {`Earliest most-available: ${format(new Date(topDates[1].date), 'PPP')} (${topDates[1].available}/${topDates[1].totalAttendees})`}
+                        {`Earliest most-available: ${formatForDisplay(topDates[1].date, 'mediumDate')} (${topDates[1].available}/${topDates[1].totalAttendees})`}
                       </p>
                     )}
                   </div>
@@ -1325,6 +1413,7 @@ export default function EventPageClient({ token }: { token: string }) {
           inCount={data?.phaseSummary?.inCount}
           deadlineExpired={(data.phaseSummary as any).deadlineExpired}
           deadlineStatus={(data.phaseSummary as any).deadlineStatus}
+          timeZone={displayTimeZone}
         />
       )}
 
@@ -1526,7 +1615,7 @@ export default function EventPageClient({ token }: { token: string }) {
                       </span>
                       {finalDraft && finalDraft !== 'clear' ? (
                         <span className='text-lg font-bold text-blue-600'>
-                          {format(new Date(finalDraft), 'EEEE, MMMM d, yyyy')}
+                          {formatForDisplay(finalDraft, 'weekdayLong')}
                         </span>
                       ) : (
                         <span className='text-lg text-slate-400'>
@@ -1638,7 +1727,7 @@ export default function EventPageClient({ token }: { token: string }) {
 
               <div className='bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl p-6 mb-8 border border-blue-200'>
                 <div className='text-2xl font-bold text-slate-900 mb-2'>
-                  {format(new Date(finalDraft), 'EEEE, MMMM d, yyyy')}
+                  {formatForDisplay(finalDraft, 'weekdayLong')}
                 </div>
                 <div className='text-slate-600 mb-3'>
                   Your selected event date

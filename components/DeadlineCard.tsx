@@ -1,12 +1,9 @@
 'use client';
 
-import {
-  format,
-  isAfter,
-  differenceInHours,
-  differenceInMinutes,
-} from 'date-fns';
+import { isAfter, differenceInHours, differenceInMinutes } from 'date-fns';
 import { useState, useEffect } from 'react';
+
+import { formatInTimeZone } from '@/lib/timezone';
 
 interface DeadlineCardProps {
   voteDeadline?: string;
@@ -19,6 +16,7 @@ interface DeadlineCardProps {
     | 'expired_without_quorum'
     | 'active_with_quorum'
     | 'active_needs_quorum';
+  timeZone?: string;
 }
 
 export default function DeadlineCard({
@@ -27,6 +25,7 @@ export default function DeadlineCard({
   quorum,
   inCount,
   deadlineExpired,
+  timeZone = 'UTC',
 }: DeadlineCardProps) {
   const [timeLeft, setTimeLeft] = useState<string>('');
   const [isExpired, setIsExpired] = useState(false);
@@ -68,6 +67,7 @@ export default function DeadlineCard({
   if (!voteDeadline) return null;
 
   const deadline = new Date(voteDeadline);
+  const formattedDeadline = formatInTimeZone(deadline, timeZone, 'dateTime');
   const expired =
     deadlineExpired !== undefined
       ? deadlineExpired
@@ -100,7 +100,7 @@ export default function DeadlineCard({
             <h3 className='font-semibold text-slate-900'>
               {expired ? 'Voting Deadline Expired' : 'Voting Deadline'}
             </h3>
-            <p className='text-sm text-slate-600'>{format(deadline, 'PPpp')}</p>
+            <p className='text-sm text-slate-600'>{formattedDeadline}</p>
           </div>
         </div>
 
